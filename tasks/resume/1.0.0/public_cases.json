@@ -1,0 +1,75 @@
+[
+  {
+    "id": "resume-0",
+    "input": {
+      "steps": [
+        "retrieve",
+        "act",
+        "finish"
+      ],
+      "calls": [
+        {
+          "session": "s1"
+        },
+        {
+          "session": "s2"
+        }
+      ]
+    },
+    "expected": {
+      "s1": [
+        "retrieve",
+        "act",
+        "finish"
+      ],
+      "s2": [
+        "retrieve",
+        "act",
+        "finish"
+      ]
+    },
+    "group": "regression"
+  },
+  {
+    "id": "resume-1",
+    "input": {
+      "steps": [
+        "retrieve",
+        "act",
+        "finish"
+      ],
+      "calls": [
+        {
+          "session": "s1",
+          "stop_after": 1
+        },
+        {
+          "session": "s2",
+          "stop_after": 1
+        },
+        {
+          "session": "s1"
+        },
+        {
+          "session": "s2"
+        },
+        {
+          "session": "s1"
+        }
+      ]
+    },
+    "expected": {
+      "s1": [
+        "retrieve",
+        "act",
+        "finish"
+      ],
+      "s2": [
+        "retrieve",
+        "act",
+        "finish"
+      ]
+    },
+    "group": "target"
+  }
+]

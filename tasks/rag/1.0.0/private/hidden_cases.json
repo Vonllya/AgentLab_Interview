@@ -1,0 +1,264 @@
+[
+  {
+    "id": "rag-2",
+    "input": {
+      "documents": [
+        {
+          "id": "d0",
+          "text": "内容0"
+        },
+        {
+          "id": "d1",
+          "text": "内容1"
+        },
+        {
+          "id": "d2",
+          "text": "内容2"
+        },
+        {
+          "id": "d3",
+          "text": "内容3"
+        }
+      ],
+      "order": [
+        2,
+        0
+      ]
+    },
+    "expected": [
+      {
+        "text": "内容2",
+        "citation": "d2"
+      },
+      {
+        "text": "内容0",
+        "citation": "d0"
+      }
+    ],
+    "group": "target"
+  },
+  {
+    "id": "rag-3",
+    "input": {
+      "documents": [
+        {
+          "id": "d0",
+          "text": "内容0"
+        },
+        {
+          "id": "d1",
+          "text": "内容1"
+        },
+        {
+          "id": "d2",
+          "text": "内容2"
+        },
+        {
+          "id": "d3",
+          "text": "内容3"
+        }
+      ],
+      "order": [
+        2
+      ]
+    },
+    "expected": [
+      {
+        "text": "内容2",
+        "citation": "d2"
+      }
+    ],
+    "group": "target"
+  },
+  {
+    "id": "rag-4",
+    "input": {
+      "documents": [
+        {
+          "id": "d0",
+          "text": "内容0"
+        },
+        {
+          "id": "d1",
+          "text": "内容1"
+        },
+        {
+          "id": "d2",
+          "text": "内容2"
+        },
+        {
+          "id": "d3",
+          "text": "内容3"
+        }
+      ],
+      "order": []
+    },
+    "expected": [],
+    "group": "target"
+  },
+  {
+    "id": "rag-5",
+    "input": {
+      "documents": [
+        {
+          "id": "d0",
+          "text": "内容0"
+        },
+        {
+          "id": "d1",
+          "text": "内容1"
+        },
+        {
+          "id": "d2",
+          "text": "内容2"
+        },
+        {
+          "id": "d3",
+          "text": "内容3"
+        }
+      ],
+      "order": [
+        3,
+        1,
+        0,
+        2
+      ]
+    },
+    "expected": [
+      {
+        "text": "内容3",
+        "citation": "d3"
+      },
+      {
+        "text": "内容1",
+        "citation": "d1"
+      },
+      {
+        "text": "内容0",
+        "citation": "d0"
+      },
+      {
+        "text": "内容2",
+        "citation": "d2"
+      }
+    ],
+    "group": "target"
+  },
+  {
+    "id": "rag-count-0",
+    "input": {
+      "documents": [],
+      "order": []
+    },
+    "expected": [],
+    "group": "target"
+  },
+  {
+    "id": "rag-count-1",
+    "input": {
+      "documents": [
+        {
+          "id": "case1-0",
+          "text": "固定内容/1/0"
+        }
+      ],
+      "order": [
+        0
+      ]
+    },
+    "expected": [
+      {
+        "text": "固定内容/1/0",
+        "citation": "case1-0"
+      }
+    ],
+    "group": "target"
+  },
+  {
+    "id": "rag-count-2",
+    "input": {
+      "documents": [
+        {
+          "id": "case2-0",
+          "text": "固定内容/2/0"
+        },
+        {
+          "id": "case2-1",
+          "text": "固定内容/2/1"
+        }
+      ],
+      "order": [
+        1,
+        0
+      ]
+    },
+    "expected": [
+      {
+        "text": "固定内容/2/1",
+        "citation": "case2-1"
+      },
+      {
+        "text": "固定内容/2/0",
+        "citation": "case2-0"
+      }
+    ],
+    "group": "target"
+  },
+  {
+    "id": "rag-count-5",
+    "input": {
+      "documents": [
+        {
+          "id": "case5-0",
+          "text": "固定内容/5/0"
+        },
+        {
+          "id": "case5-1",
+          "text": "固定内容/5/1"
+        },
+        {
+          "id": "case5-2",
+          "text": "固定内容/5/2"
+        },
+        {
+          "id": "case5-3",
+          "text": "固定内容/5/3"
+        },
+        {
+          "id": "case5-4",
+          "text": "固定内容/5/4"
+        }
+      ],
+      "order": [
+        4,
+        3,
+        2,
+        1,
+        0
+      ]
+    },
+    "expected": [
+      {
+        "text": "固定内容/5/4",
+        "citation": "case5-4"
+      },
+      {
+        "text": "固定内容/5/3",
+        "citation": "case5-3"
+      },
+      {
+        "text": "固定内容/5/2",
+        "citation": "case5-2"
+      },
+      {
+        "text": "固定内容/5/1",
+        "citation": "case5-1"
+      },
+      {
+        "text": "固定内容/5/0",
+        "citation": "case5-0"
+      }
+    ],
+    "group": "target"
+  }
+]

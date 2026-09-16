@@ -1,0 +1,70 @@
+[
+  {
+    "id": "retry-0",
+    "input": {
+      "failures": [],
+      "operations": [
+        {
+          "id": "one",
+          "value": "相同"
+        },
+        {
+          "id": "two",
+          "value": "相同"
+        },
+        {
+          "id": "one",
+          "value": "相同"
+        }
+      ]
+    },
+    "expected": {
+      "records": [
+        "相同",
+        "相同"
+      ],
+      "results": [
+        1,
+        2,
+        1
+      ],
+      "calls": 3
+    },
+    "group": "regression"
+  },
+  {
+    "id": "retry-1",
+    "input": {
+      "failures": [
+        "after"
+      ],
+      "operations": [
+        {
+          "id": "one",
+          "value": "相同"
+        },
+        {
+          "id": "two",
+          "value": "相同"
+        },
+        {
+          "id": "one",
+          "value": "相同"
+        }
+      ]
+    },
+    "expected": {
+      "records": [
+        "相同",
+        "相同"
+      ],
+      "results": [
+        1,
+        2,
+        1
+      ],
+      "calls": 4
+    },
+    "group": "target"
+  }
+]

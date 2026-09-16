@@ -1,0 +1,78 @@
+[
+  {
+    "id": "rag-0",
+    "input": {
+      "documents": [
+        {
+          "id": "d0",
+          "text": "内容0"
+        },
+        {
+          "id": "d1",
+          "text": "内容1"
+        },
+        {
+          "id": "d2",
+          "text": "内容2"
+        },
+        {
+          "id": "d3",
+          "text": "内容3"
+        }
+      ],
+      "order": [
+        0,
+        1
+      ]
+    },
+    "expected": [
+      {
+        "text": "内容0",
+        "citation": "d0"
+      },
+      {
+        "text": "内容1",
+        "citation": "d1"
+      }
+    ],
+    "group": "regression"
+  },
+  {
+    "id": "rag-1",
+    "input": {
+      "documents": [
+        {
+          "id": "d0",
+          "text": "内容0"
+        },
+        {
+          "id": "d1",
+          "text": "内容1"
+        },
+        {
+          "id": "d2",
+          "text": "内容2"
+        },
+        {
+          "id": "d3",
+          "text": "内容3"
+        }
+      ],
+      "order": [
+        1,
+        0
+      ]
+    },
+    "expected": [
+      {
+        "text": "内容1",
+        "citation": "d1"
+      },
+      {
+        "text": "内容0",
+        "citation": "d0"
+      }
+    ],
+    "group": "target"
+  }
+]

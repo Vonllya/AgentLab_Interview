@@ -1,0 +1,15 @@
+{
+  "id": "retry",
+  "version": "1.0.0",
+  "title": "工具超时重试导致重复执行",
+  "tags": [
+    "工具调用",
+    "幂等性"
+  ],
+  "minutes": 25,
+  "brief": "本地工具写入成功但响应丢失后，一次操作可能出现重复记录。operation_id 标识逻辑操作；同一 ID 的重复请求携带相同 value，不同 ID 即使 value 相同也必须独立写入。最多尝试 5 次；写入前暂时失败和写入后响应丢失均应重试，耗尽次数必须抛出异常。保持 LocalTool 模拟服务与 scenario 协议不变，仅修改 operate 函数。返回真实 records、results 和 calls。",
+  "editable": [
+    "solution.py"
+  ],
+  "environment": "Python 3.10.16 / 标准库；服务端 pytest 8.3.5；固定 JSON 数据，无模型随机性"
+}

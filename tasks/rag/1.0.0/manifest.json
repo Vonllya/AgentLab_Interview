@@ -1,0 +1,15 @@
+{
+  "id": "rag",
+  "version": "1.0.0",
+  "title": "RAG 重排后的引用错位",
+  "tags": [
+    "RAG",
+    "数据映射"
+  ],
+  "minutes": 25,
+  "brief": "回答引用的文档与实际使用的内容不一致。输入 documents 中 id 唯一，order 是检索器提供的无重复有效索引，可包含过滤后的子集或空列表。返回必须按 order 顺序逐项输出 text 和对应 citation，保留重排和过滤能力。",
+  "editable": [
+    "solution.py"
+  ],
+  "environment": "Python 3.10.16 / 标准库；服务端 pytest 8.3.5；固定 JSON 数据，无模型随机性"
+}

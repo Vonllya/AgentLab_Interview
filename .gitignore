@@ -1,0 +1,17 @@
+data/
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+*.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
+
+# Local credentials, assistant configuration and validation screenshots
+.env.*
+!.env.example
+/.codex/
+/.agents/
+/docs/*.png

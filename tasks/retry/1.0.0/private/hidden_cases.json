@@ -1,0 +1,182 @@
+[
+  {
+    "id": "retry-2",
+    "input": {
+      "failures": [
+        "before"
+      ],
+      "operations": [
+        {
+          "id": "one",
+          "value": "相同"
+        },
+        {
+          "id": "two",
+          "value": "相同"
+        },
+        {
+          "id": "one",
+          "value": "相同"
+        }
+      ]
+    },
+    "expected": {
+      "records": [
+        "相同",
+        "相同"
+      ],
+      "results": [
+        1,
+        2,
+        1
+      ],
+      "calls": 4
+    },
+    "group": "target"
+  },
+  {
+    "id": "retry-3",
+    "input": {
+      "failures": [
+        "after",
+        "after",
+        "before"
+      ],
+      "operations": [
+        {
+          "id": "one",
+          "value": "相同"
+        },
+        {
+          "id": "two",
+          "value": "相同"
+        },
+        {
+          "id": "one",
+          "value": "相同"
+        }
+      ]
+    },
+    "expected": {
+      "records": [
+        "相同",
+        "相同"
+      ],
+      "results": [
+        1,
+        2,
+        1
+      ],
+      "calls": 6
+    },
+    "group": "target"
+  },
+  {
+    "id": "retry-4",
+    "input": {
+      "failures": [
+        "before",
+        "before"
+      ],
+      "operations": [
+        {
+          "id": "one",
+          "value": "相同"
+        },
+        {
+          "id": "two",
+          "value": "相同"
+        },
+        {
+          "id": "one",
+          "value": "相同"
+        }
+      ]
+    },
+    "expected": {
+      "records": [
+        "相同",
+        "相同"
+      ],
+      "results": [
+        1,
+        2,
+        1
+      ],
+      "calls": 5
+    },
+    "group": "target"
+  },
+  {
+    "id": "retry-exhaust",
+    "input": {
+      "failures": [
+        "before",
+        "before",
+        "before",
+        "before",
+        "before"
+      ],
+      "operations": [
+        {
+          "id": "one",
+          "value": "x"
+        }
+      ]
+    },
+    "expected": {
+      "error": "TransientError"
+    },
+    "group": "constraint"
+  },
+  {
+    "id": "retry-distinct-values",
+    "group": "target",
+    "input": {
+      "failures": [
+        "after",
+        "before",
+        "after"
+      ],
+      "operations": [
+        {
+          "id": "x9",
+          "value": "first"
+        },
+        {
+          "id": "y2",
+          "value": "second"
+        },
+        {
+          "id": "x9",
+          "value": "first"
+        }
+      ]
+    },
+    "expected": {
+      "records": [
+        "first",
+        "second"
+      ],
+      "results": [
+        1,
+        2,
+        1
+      ],
+      "calls": 6
+    }
+  },
+  {
+    "id": "retry-empty",
+    "group": "regression",
+    "input": {
+      "failures": [],
+      "operations": []
+    },
+    "expected": {
+      "records": [],
+      "results": [],
+      "calls": 0
+    }
+  }
+]
