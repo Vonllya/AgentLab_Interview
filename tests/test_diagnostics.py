@@ -2,7 +2,7 @@ import subprocess
 from types import SimpleNamespace
 import pytest
 from backend import executor
-from scripts.verify_acceptance import ORIGINAL_DOCKER_TESTS, REQUIRED_DOCKER_TESTS, verify_pytest, verify_browser
+from scripts.verify_acceptance import ORIGINAL_DOCKER_TESTS, REQUIRED_DOCKER_TESTS, ADVANCED_DOCKER_TESTS, verify_pytest, verify_browser
 
 @pytest.mark.parametrize('stage,message,expected',[
     ('info','permission denied while trying to connect','permission_denied'),
@@ -39,6 +39,13 @@ def test_acceptance_rejects_skipped_or_missing_docker_tests(tmp_path):
     import xml.etree.ElementTree as ET
     root=ET.Element('testsuite')
     for name in sorted(REQUIRED_DOCKER_TESTS):ET.SubElement(root,'testcase',classname='tests.test_docker_acceptance',name=name)
+    for name in sorted(ADVANCED_DOCKER_TESTS):ET.SubElement(root,'testcase',classname='tests.test_versioning_docker',name=name)
+    ET.SubElement(root,'testcase',classname='tests.test_generation',name='test_generated_docker_publish_train_freeze')
+    ET.SubElement(root,'testcase',classname='tests.test_generation_flow',name='test_generated_docker_automatic_scoped_repair')
+    ET.SubElement(root,'testcase',classname='tests.test_generation_reliability',name='test_generated_docker_rollback_runs_fresh_without_extra_gates')
+    ET.SubElement(root,'testcase',classname='tests.test_contract_revision',name='test_generated_docker_contract_local_correction_revalidates')
+    ET.SubElement(root,'testcase',classname='tests.test_generation_protocol',name='test_generated_docker_v2_classification_repair_and_binding')
+    ET.SubElement(root,'testcase',classname='tests.test_generation_direct',name='test_direct_docker_build_review_repair_publish_train')
     path=tmp_path/'results.xml';ET.ElementTree(root).write(path)
     assert verify_pytest(path)['passed']
     ET.SubElement(root[0],'skipped');ET.ElementTree(root).write(path)

@@ -1,5 +1,6 @@
 """Optional direct execution of the published pytest files, using Docker only."""
 from pathlib import Path
+import json
 import pytest
 from backend.executor import execute as docker_execute, availability
 
@@ -13,4 +14,5 @@ def execute(request):
     if not folder:pytest.fail('请提供 --workspace-snapshot；禁止在宿主导入用户代码')
     ready,reason=availability()
     if not ready:pytest.skip(reason)
-    return lambda payload:docker_execute(Path(folder),payload)
+    manifest=json.loads((Path(str(request.node.fspath)).parent/'manifest.json').read_text())
+    return lambda payload:docker_execute(Path(folder),payload,allowed_files=manifest.get('readable',['solution.py']))

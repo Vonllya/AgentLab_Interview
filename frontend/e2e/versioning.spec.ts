@@ -1,0 +1,73 @@
+import {test,expect} from '@playwright/test';
+import {readFileSync} from 'node:fs';
+
+test('进阶多文件 Docker 提交与快照恢复闭环',async({page,request},testInfo)=>{
+ test.setTimeout(240000);
+ const health=await (await request.get('/api/health')).json();
+ test.skip(!health.docker_available,'Docker 不可用，禁止宿主降级');
+ await page.goto('/');
+ await page.locator('.cards article').filter({has:page.getByRole('heading',{name:'知识库更新后的旧版本污染'})}).getByRole('button',{name:'开始训练 ↗'}).click();
+ await expect(page.getByText('任务说明',{exact:true})).toBeVisible();
+ const id=await page.evaluate(()=>localStorage.getItem('session'));
+ for(const name of ['solution.py','pipeline.py','ingestion.py','retrieval.py','context_builder.py']){
+  await page.getByRole('button',{name:'打开文件 '+name,exact:true}).click();
+  await expect(page.locator('.editor .panelhead')).toContainText(name);
+ }
+ await page.getByRole('button',{name:'打开文件 solution.py',exact:true}).click();
+ await expect(page.locator('.editor .panelhead')).toContainText('只读');
+ await expect(page.getByText('✓ 已保存',{exact:true})).toBeVisible();
+ const before=await (await request.get(`/api/sessions/${id}`)).json();
+ await page.context().grantPermissions(['clipboard-read','clipboard-write']);
+ async function edit(name:string,code:string){
+  await page.getByRole('button',{name:'打开文件 '+name,exact:true}).click();
+  await page.evaluate(text=>navigator.clipboard.writeText(text),code);
+  await page.locator('.monaco-editor textarea').first().focus();
+  await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('ControlOrMeta+V');
+ }
+ const reference=readFileSync('../tasks/rag_versioning/1.0.0/private/reference/index_store.py','utf8');
+ await edit('index_store.py',reference);
+ const pipeline=before.files['pipeline.py']+'\n# multi-file browser proof\n';
+ await edit('pipeline.py',pipeline);
+ await page.getByLabel('诊断说明').fill('更新轨迹中同一文档存在旧片段；按文档替换并验证空正文、低版本与重开持久化。');
+ await page.getByRole('button',{name:'打开文件 retrieval.py',exact:true}).click();
+ await expect(page.getByText('● 有未保存修改（草稿已本地保留）')).toBeVisible();
+ await page.reload();
+ await expect(page.getByText('● 有未保存修改（草稿已本地保留）')).toBeVisible();
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await expect(page.getByText('✓ 已保存',{exact:true})).toBeVisible();
+ const saved=await (await request.get(`/api/sessions/${id}`)).json();
+ expect(saved.files['index_store.py']).toBe(reference);expect(saved.files['pipeline.py']).toBe(pipeline);
+ expect(saved.files).toEqual({...before.files,'index_store.py':reference,'pipeline.py':pipeline});
+ await page.getByRole('button',{name:'保存并运行公开测试'}).click();
+ await expect(page.locator('.run').first().locator('.runhead .status')).toHaveText('通过',{timeout:120000});
+ const publicState=await (await request.get(`/api/sessions/${id}`)).json();
+ expect(publicState.runs[0].checks.filter((c:{diagnostic_trace?:unknown})=>c.diagnostic_trace).length).toBe(3);
+ await page.getByRole('button',{name:'请求提示 · 1/3'}).click();
+ await expect(page.getByText(/提示 1\/3：/)).toBeVisible();
+ await edit('context_builder.py',before.files['context_builder.py']+'\n# submitted revision\n');
+ await page.getByRole('button',{name:'保存并提交评测'}).click();
+ await expect(page.locator('.report')).toBeVisible({timeout:120000});
+ await expect(page.locator('.report .runhead .status')).toHaveText('通过');
+ const state=await (await request.get(`/api/sessions/${id}`)).json();const report=state.reports[0];
+ expect(report.objective.checks).toHaveLength(15);
+ expect(report.snapshot).toBe(report.objective.snapshot);
+ expect(report.snapshot).not.toBe(publicState.runs[0].snapshot);
+ expect(report.objective.hints).toHaveLength(1);
+ const snapshot=await (await request.get(`/api/sessions/${id}/snapshots/${report.snapshot}`)).json();
+ expect(Object.keys(snapshot.files)).toHaveLength(6);
+ expect(snapshot.files['pipeline.py']).toBe(pipeline);
+ await page.locator('.report').getByRole('button',{name:report.snapshot.slice(0,16)+' ↗'}).click();
+ await expect(page.locator('.evidence > pre')).toContainText('===== index_store.py =====');
+ await expect(page.locator('.evidence > pre')).toContainText('===== pipeline.py =====');
+ await edit('pipeline.py',pipeline+'# after submission\n');
+ await page.getByRole('button',{name:'保存',exact:true}).click();
+ await expect(page.getByText('✓ 已保存',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'请求提示 · 2/3'}).click();
+ await expect(page.getByText(/提示 2\/3：/)).toBeVisible();
+ await page.reload();await page.getByRole('button',{name:/提交报告/}).click();
+ await expect(page.locator('.report .runhead .status')).toHaveText('通过');
+ await expect(page.locator('.report')).toContainText('提示使用 · 1 次');
+ expect((await (await request.get(`/api/sessions/${id}/snapshots/${report.snapshot}`)).json()).files).toEqual(snapshot.files);
+ await testInfo.attach('multifile-submission',{body:JSON.stringify({id,report,snapshot},null,2),contentType:'application/json'});
+ await page.screenshot({path:testInfo.outputPath('versioning-report.png'),fullPage:true});
+});

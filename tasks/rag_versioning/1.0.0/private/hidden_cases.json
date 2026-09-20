@@ -1,0 +1,811 @@
+[
+  {
+    "id": "version-shrink",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "新片段更少时清除旧片段",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "doc",
+          "version": 3,
+          "body": "政策 旧甲\n政策 旧乙\n政策 旧丙"
+        },
+        {
+          "op": "import",
+          "document_id": "doc",
+          "version": 9,
+          "body": "政策 新版"
+        },
+        {
+          "op": "query",
+          "query": "政策",
+          "limit": 5
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "政策",
+          "answer": "政策 新版",
+          "citations": [
+            {
+              "chunk_id": "doc:9:0",
+              "document_id": "doc",
+              "version": 9
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "doc": 9
+      },
+      "chunks": [
+        {
+          "chunk_id": "doc:9:0",
+          "document_id": "doc",
+          "version": 9,
+          "position": 0,
+          "text": "政策 新版"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-old-keyword",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "只匹配旧正文关键词时无旧命中",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "alpha",
+          "version": 10,
+          "body": "过期专属 旧规则"
+        },
+        {
+          "op": "import",
+          "document_id": "alpha",
+          "version": 12,
+          "body": "生效专属 新规则"
+        },
+        {
+          "op": "query",
+          "query": "过期专属",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "过期专属",
+          "answer": "未找到相关内容",
+          "citations": []
+        }
+      ],
+      "versions": {
+        "alpha": 12
+      },
+      "chunks": [
+        {
+          "chunk_id": "alpha:12:0",
+          "document_id": "alpha",
+          "version": 12,
+          "position": 0,
+          "text": "生效专属 新规则"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-isolation",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "多文档隔离与完整替换",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "a",
+          "version": 2,
+          "body": "policy alpha"
+        },
+        {
+          "op": "import",
+          "document_id": "b",
+          "version": 8,
+          "body": "policy beta"
+        },
+        {
+          "op": "import",
+          "document_id": "c",
+          "version": 1,
+          "body": "policy gamma"
+        },
+        {
+          "op": "import",
+          "document_id": "b",
+          "version": 11,
+          "body": "policy beta_new"
+        },
+        {
+          "op": "query",
+          "query": "policy",
+          "limit": 9
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "policy",
+          "answer": "policy alpha\npolicy beta_new\npolicy gamma",
+          "citations": [
+            {
+              "chunk_id": "a:2:0",
+              "document_id": "a",
+              "version": 2
+            },
+            {
+              "chunk_id": "b:11:0",
+              "document_id": "b",
+              "version": 11
+            },
+            {
+              "chunk_id": "c:1:0",
+              "document_id": "c",
+              "version": 1
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "a": 2,
+        "b": 11,
+        "c": 1
+      },
+      "chunks": [
+        {
+          "chunk_id": "a:2:0",
+          "document_id": "a",
+          "version": 2,
+          "position": 0,
+          "text": "policy alpha"
+        },
+        {
+          "chunk_id": "b:11:0",
+          "document_id": "b",
+          "version": 11,
+          "position": 0,
+          "text": "policy beta_new"
+        },
+        {
+          "chunk_id": "c:1:0",
+          "document_id": "c",
+          "version": 1,
+          "position": 0,
+          "text": "policy gamma"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-repeat",
+    "contract": "versioned_index",
+    "group": "regression",
+    "coverage": "相同版本内容重复导入幂等",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "x",
+          "version": 4,
+          "body": "rule first"
+        },
+        {
+          "op": "import",
+          "document_id": "x",
+          "version": 4,
+          "body": "rule first"
+        },
+        {
+          "op": "query",
+          "query": "rule",
+          "limit": 4
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "rule",
+          "answer": "rule first",
+          "citations": [
+            {
+              "chunk_id": "x:4:0",
+              "document_id": "x",
+              "version": 4
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "x": 4
+      },
+      "chunks": [
+        {
+          "chunk_id": "x:4:0",
+          "document_id": "x",
+          "version": 4,
+          "position": 0,
+          "text": "rule first"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-delayed",
+    "contract": "versioned_index",
+    "group": "regression",
+    "coverage": "忽略迟到的低版本",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "late",
+          "version": 20,
+          "body": "rule current"
+        },
+        {
+          "op": "import",
+          "document_id": "late",
+          "version": 7,
+          "body": "rule outdated"
+        },
+        {
+          "op": "query",
+          "query": "rule",
+          "limit": 4
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "rule",
+          "answer": "rule current",
+          "citations": [
+            {
+              "chunk_id": "late:20:0",
+              "document_id": "late",
+              "version": 20
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "late": 20
+      },
+      "chunks": [
+        {
+          "chunk_id": "late:20:0",
+          "document_id": "late",
+          "version": 20,
+          "position": 0,
+          "text": "rule current"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-empty",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "空正文清除且保留版本，拒绝低版本，重开一致",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "empty",
+          "version": 1,
+          "body": "旧片段 保留测试"
+        },
+        {
+          "op": "import",
+          "document_id": "other",
+          "version": 3,
+          "body": "独立规则"
+        },
+        {
+          "op": "import",
+          "document_id": "empty",
+          "version": 6,
+          "body": ""
+        },
+        {
+          "op": "import",
+          "document_id": "empty",
+          "version": 2,
+          "body": "迟到旧片段"
+        },
+        {
+          "op": "reopen"
+        },
+        {
+          "op": "query",
+          "query": "旧片段",
+          "limit": 1
+        },
+        {
+          "op": "query",
+          "query": "独立规则",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "旧片段",
+          "answer": "未找到相关内容",
+          "citations": []
+        },
+        {
+          "query": "独立规则",
+          "answer": "独立规则",
+          "citations": [
+            {
+              "chunk_id": "other:3:0",
+              "document_id": "other",
+              "version": 3
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "empty": 6,
+        "other": 3
+      },
+      "chunks": [
+        {
+          "chunk_id": "other:3:0",
+          "document_id": "other",
+          "version": 3,
+          "position": 0,
+          "text": "独立规则"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-reopen",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "更新关闭重开后仍为新版本",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "persist",
+          "version": 5,
+          "body": "query old"
+        },
+        {
+          "op": "import",
+          "document_id": "persist",
+          "version": 9,
+          "body": "query current"
+        },
+        {
+          "op": "reopen"
+        },
+        {
+          "op": "query",
+          "query": "query",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "query",
+          "answer": "query current",
+          "citations": [
+            {
+              "chunk_id": "persist:9:0",
+              "document_id": "persist",
+              "version": 9
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "persist": 9
+      },
+      "chunks": [
+        {
+          "chunk_id": "persist:9:0",
+          "document_id": "persist",
+          "version": 9,
+          "position": 0,
+          "text": "query current"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-empty-first",
+    "contract": "versioned_index",
+    "group": "regression",
+    "coverage": "首次空正文版本持久化",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "zero",
+          "version": 8,
+          "body": ""
+        },
+        {
+          "op": "reopen"
+        },
+        {
+          "op": "import",
+          "document_id": "zero",
+          "version": 1,
+          "body": "返旧 内容"
+        },
+        {
+          "op": "query",
+          "query": "返旧",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "返旧",
+          "answer": "未找到相关内容",
+          "citations": []
+        }
+      ],
+      "versions": {
+        "zero": 8
+      },
+      "chunks": []
+    }
+  },
+  {
+    "id": "version-varied-0",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "不同 ID、整数版本和查询组合",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "policy-37",
+          "version": -2,
+          "body": "term0 old\nlegacy0 extra"
+        },
+        {
+          "op": "import",
+          "document_id": "independent",
+          "version": 50,
+          "body": "alone untouched"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-37",
+          "version": 5,
+          "body": "term0 new"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-37",
+          "version": 5,
+          "body": "term0 new"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-37",
+          "version": 0,
+          "body": "term0 stale"
+        },
+        {
+          "op": "reopen"
+        },
+        {
+          "op": "query",
+          "query": "legacy0",
+          "limit": 1
+        },
+        {
+          "op": "query",
+          "query": "term0",
+          "limit": 1
+        },
+        {
+          "op": "query",
+          "query": "alone",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "legacy0",
+          "answer": "未找到相关内容",
+          "citations": []
+        },
+        {
+          "query": "term0",
+          "answer": "term0 new",
+          "citations": [
+            {
+              "chunk_id": "policy-37:5:0",
+              "document_id": "policy-37",
+              "version": 5
+            }
+          ]
+        },
+        {
+          "query": "alone",
+          "answer": "alone untouched",
+          "citations": [
+            {
+              "chunk_id": "independent:50:0",
+              "document_id": "independent",
+              "version": 50
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "policy-37": 5,
+        "independent": 50
+      },
+      "chunks": [
+        {
+          "chunk_id": "independent:50:0",
+          "document_id": "independent",
+          "version": 50,
+          "position": 0,
+          "text": "alone untouched"
+        },
+        {
+          "chunk_id": "policy-37:5:0",
+          "document_id": "policy-37",
+          "version": 5,
+          "position": 0,
+          "text": "term0 new"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-varied-1",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "不同 ID、整数版本和查询组合",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "policy-38",
+          "version": 11,
+          "body": "term1 old\nlegacy1 extra"
+        },
+        {
+          "op": "import",
+          "document_id": "independent",
+          "version": 50,
+          "body": "alone untouched"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-38",
+          "version": 18,
+          "body": "term1 new"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-38",
+          "version": 18,
+          "body": "term1 new"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-38",
+          "version": 13,
+          "body": "term1 stale"
+        },
+        {
+          "op": "reopen"
+        },
+        {
+          "op": "query",
+          "query": "legacy1",
+          "limit": 1
+        },
+        {
+          "op": "query",
+          "query": "term1",
+          "limit": 1
+        },
+        {
+          "op": "query",
+          "query": "alone",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "legacy1",
+          "answer": "未找到相关内容",
+          "citations": []
+        },
+        {
+          "query": "term1",
+          "answer": "term1 new",
+          "citations": [
+            {
+              "chunk_id": "policy-38:18:0",
+              "document_id": "policy-38",
+              "version": 18
+            }
+          ]
+        },
+        {
+          "query": "alone",
+          "answer": "alone untouched",
+          "citations": [
+            {
+              "chunk_id": "independent:50:0",
+              "document_id": "independent",
+              "version": 50
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "policy-38": 18,
+        "independent": 50
+      },
+      "chunks": [
+        {
+          "chunk_id": "independent:50:0",
+          "document_id": "independent",
+          "version": 50,
+          "position": 0,
+          "text": "alone untouched"
+        },
+        {
+          "chunk_id": "policy-38:18:0",
+          "document_id": "policy-38",
+          "version": 18,
+          "position": 0,
+          "text": "term1 new"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-varied-2",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "不同 ID、整数版本和查询组合",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "policy-39",
+          "version": 24,
+          "body": "term2 old\nlegacy2 extra"
+        },
+        {
+          "op": "import",
+          "document_id": "independent",
+          "version": 50,
+          "body": "alone untouched"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-39",
+          "version": 31,
+          "body": "term2 new"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-39",
+          "version": 31,
+          "body": "term2 new"
+        },
+        {
+          "op": "import",
+          "document_id": "policy-39",
+          "version": 26,
+          "body": "term2 stale"
+        },
+        {
+          "op": "reopen"
+        },
+        {
+          "op": "query",
+          "query": "legacy2",
+          "limit": 1
+        },
+        {
+          "op": "query",
+          "query": "term2",
+          "limit": 1
+        },
+        {
+          "op": "query",
+          "query": "alone",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "legacy2",
+          "answer": "未找到相关内容",
+          "citations": []
+        },
+        {
+          "query": "term2",
+          "answer": "term2 new",
+          "citations": [
+            {
+              "chunk_id": "policy-39:31:0",
+              "document_id": "policy-39",
+              "version": 31
+            }
+          ]
+        },
+        {
+          "query": "alone",
+          "answer": "alone untouched",
+          "citations": [
+            {
+              "chunk_id": "independent:50:0",
+              "document_id": "independent",
+              "version": 50
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "policy-39": 31,
+        "independent": 50
+      },
+      "chunks": [
+        {
+          "chunk_id": "independent:50:0",
+          "document_id": "independent",
+          "version": 50,
+          "position": 0,
+          "text": "alone untouched"
+        },
+        {
+          "chunk_id": "policy-39:31:0",
+          "document_id": "policy-39",
+          "version": 31,
+          "position": 0,
+          "text": "term2 new"
+        }
+      ]
+    }
+  }
+]

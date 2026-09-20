@@ -7,6 +7,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
+from .execution_diagnostics import typed_error
 
 IMAGE = os.getenv('AGENTLAB_IMAGE','agentlab-runner:0.1')
 
@@ -57,7 +58,9 @@ def availability():
     return result['status'] == 'ready', result['reason']
 
 
-def docker_command(folder, name):
+def docker_command(folder, name, image_id=None):
+    if image_id is not None and not re.fullmatch('sha256:[a-f0-9]{64}',image_id):
+        raise ValueError('只能使用服务端冻结的本地镜像摘要')
     run_id=os.getenv('AGENTLAB_RUN_ID','')
     labels=['--label','agentlab.run='+run_id] if re.fullmatch('[a-f0-9]{32}',run_id) else []
     return ['docker','run','--rm','--name',name,'--label','agentlab=true', *labels,
@@ -67,7 +70,7 @@ def docker_command(folder, name):
             '--pids-limit','32','--ulimit','nofile=64:64',
             '--tmpfs','/tmp:rw,noexec,nosuid,size=16m,mode=1777',
             '--mount',f'type=bind,src={folder.resolve()},dst=/workspace,readonly',
-            '-i',IMAGE]
+            *(['--pull','never'] if image_id else []),'-i',image_id or IMAGE]
 
 
 def cleanup_run(run_id):
@@ -82,24 +85,29 @@ def cleanup_run(run_id):
         pass
 
 
-def execute(folder, payload, timeout=8):
+def execute(folder, payload, timeout=8, allowed_files=None, image_id=None):
     folder=Path(folder)
     file=folder/'solution.py'
-    if folder.is_symlink() or file.is_symlink() or set(p.name for p in folder.iterdir())!={'solution.py'}:
+    allowed=set(allowed_files or ['solution.py'])
+    if 'solution.py' not in allowed or any(not re.fullmatch(r'[a-z][a-z0-9_]*\.py',name) for name in allowed):
+        raise ValueError('非法运行文件清单')
+    if folder.is_symlink() or set(p.name for p in folder.iterdir())!=allowed:
+        raise ValueError('非法执行快照')
+    if any((folder/name).is_symlink() or not (folder/name).is_file() or (folder/name).resolve().parent!=folder.resolve() for name in allowed):
         raise ValueError('非法执行快照')
     name='agentlab-'+uuid.uuid4().hex
     proc=None
     start=time.monotonic()
     output=bytearray()
     try:
-        proc=subprocess.Popen(docker_command(folder,name),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        proc=subprocess.Popen(docker_command(folder,name,image_id),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
         proc.stdin.write(json.dumps(payload).encode())
         proc.stdin.close()
         with selectors.DefaultSelector() as sel:
             sel.register(proc.stdout,selectors.EVENT_READ)
             while sel.get_map():
                 if time.monotonic()-start>timeout:
-                    raise TimeoutError(f'容器执行超过 {timeout:g} 秒')
+                    raise typed_error(TimeoutError, f'容器执行超过 {timeout:g} 秒', 'execution_timeout', 'execution', timeout_seconds=timeout)
                 for key,_ in sel.select(.1):
                     chunk=os.read(key.fileobj.fileno(),4096)
                     if not chunk:
@@ -107,14 +115,17 @@ def execute(folder, payload, timeout=8):
                     else:
                         output.extend(chunk)
                         if len(output)>32768:
-                            raise ValueError('执行输出超过 32 KiB')
+                            raise typed_error(ValueError, '执行输出超过 32 KiB', 'output_limit', 'transport', limit_bytes=32768)
         proc.wait(timeout=1)
         if proc.returncode:
-            raise RuntimeError('容器异常退出 '+str(proc.returncode))
+            raise typed_error(RuntimeError, '容器异常退出 '+str(proc.returncode), 'container_exit', 'container', exit_code=proc.returncode, possible_start_failure=proc.returncode in (125,126,127), cause='unknown')
         try:
             return json.loads(output)
         except (ValueError,UnicodeDecodeError):
-            raise ValueError('用户程序未返回有效的单个 JSON；请移除调试输出')
+            raise typed_error(ValueError, '用户程序未返回有效的单个 JSON；请移除调试输出', 'invalid_json', 'transport')
+    except OSError as exc:
+        if hasattr(exc,'diagnostic'):raise
+        raise typed_error(RuntimeError, 'Docker 进程通信或启动失败', 'docker_cli_missing' if isinstance(exc,FileNotFoundError) else 'docker_permission_denied' if isinstance(exc,PermissionError) else 'container_io_error', 'docker_cli' if proc is None else 'transport', exception_type=type(exc).__name__) from exc
     finally:
         if proc and proc.poll() is None:
             proc.kill()

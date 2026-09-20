@@ -92,7 +92,7 @@ test('模型反馈生成中和失败时仍显示客观结果',async({page,reques
   body.reports=[{id:'ui-report',run_id:'ui-run',snapshot:'ui-snapshot',diagnosis:'',feedback:'',feedback_status:status,feedback_error:{category:'output_limit',reason:'模型输出预算耗尽，未生成完整反馈'},objective:{id:'ui-run',snapshot:'ui-snapshot',kind:'submission',status:'passed',duration:1,exit_code:0,output:'客观检查已保存',checks:[],hints:[]}}];
   await route.fulfill({response,json:body});
  });
- await page.goto('/');await page.evaluate(id=>localStorage.setItem('session',id),session.id);await page.reload();
+ await page.goto('/training/'+session.id);
  await page.getByRole('button',{name:/提交报告/}).click();
  await expect(page.getByText('模型反馈 · 生成中',{exact:true})).toBeVisible();
  await expect(page.locator('.report .runhead .status')).toHaveText('通过');
@@ -112,7 +112,7 @@ test('工具默认折叠且 Markdown 安全渲染和定位',async({page,request}
    {id:'reply',role:'assistant',content:`**范围检查**不能证明功能正确。\n\n- 需要行为证据。\n- [查看证据](#${evidence})\n\n<script>window.pwned=1</script>\n\n[危险链接](javascript:alert(1))\n\n![远程图片](https://invalid.example/tracker)`}];
   await route.fulfill({response,json:body});
  });
- await page.goto('/');await page.evaluate(id=>localStorage.setItem('session',id),session.id);await page.reload();
+ await page.goto('/training/'+session.id);
  const tool=page.locator(`details[id="${evidence}"]`);
  await expect(tool).not.toHaveAttribute('open');await expect(tool.locator('pre')).not.toBeVisible();
  await expect(tool.locator('summary')).toContainText('完成');await expect(tool.locator('summary')).toContainText('范围通过；行为失败');

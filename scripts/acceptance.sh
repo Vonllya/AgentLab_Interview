@@ -21,4 +21,4 @@ browser_status=0
 npm --prefix frontend run test:e2e -- --reporter=list,json || browser_status=$?
 .venv/bin/python scripts/verify_acceptance.py browser "$acceptance_dir/browser.json"
 if [ "$browser_status" -ne 0 ]; then exit "$browser_status"; fi
-echo '验收通过：全部 18 项 Docker 测试及浏览器提交闭环均已实际执行且通过，无跳过。'
+echo '验收通过：原有 18 项和进阶任务 8 项 Docker 测试、生成发布训练及角色自动修复与契约修订、前五项回退兼容和分离证据协议修复与直接构建测试、六条浏览器闭环均已实际执行且通过，无跳过。'

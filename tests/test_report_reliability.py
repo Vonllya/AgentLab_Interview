@@ -112,3 +112,25 @@ def test_report_check_links_are_bound_to_own_run(client,session):
     case=json.loads((s.package(session)/'public_cases.json').read_text())[1]
     domain=evidence.public_coverage('rag',case)['valid_input_domain']
     assert '非连续子集与空集' in domain and '不属于验收契约' in domain
+
+
+def test_report_distinguishes_passed_submission_from_diagnosed_prior_failure(client,session):
+    report=report_for(session);report['objective']['status']='passed'
+    report['diagnosis']='系统功能验证使用参考修复；历史公开执行曾暴露故障。'
+    for retry in (False,True):
+        messages=agent.report_messages(session,report,retry=retry)
+        payload=json.loads(messages[-1]['content'])
+        assert payload['execution_status']=='passed'
+        assert '不包含修复前运行' in payload['evidence_scope']
+        assert '用户提交陈述' in payload['diagnosis_source']
+        assert '通过检查不能被引用为修复前失败' in messages[0]['content']
+        assert '不代表独立定位或学习效果' in messages[0]['content']
+        assert payload['run_id']==report['run_id']
+
+
+def test_non_rag_scope_has_no_rag_specific_claims(client,session,monkeypatch):
+    package=s.package(session);monkeypatch.setattr(s,'package',lambda _:package)
+    result=evidence.run_evidence({**session,'task_id':'gen_permission'}, {'checks':[{'id':'modification-scope','status':'passed'}]})
+    scope=result['checks'][0]
+    assert scope['does_not_prove']==['代码确实发生修改','任务功能正确','未覆盖场景通过']
+    assert '过滤' not in json.dumps(result,ensure_ascii=False)

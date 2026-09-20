@@ -39,7 +39,8 @@ def perform(session,run):
         s.put('run',run['id'],run,session['id'])
         folder=s.DATA/'runs'/run['id']; folder.mkdir(parents=True)
         snap=s.DATA/'snapshots'/run['snapshot']
-        violations=w.constraints(session,(snap/'solution.py').read_text())
+        contents=w.snapshot_contents(session,run['snapshot'])
+        violations=w.constraints(session,contents['solution.py'])
         if violations:
             run.update(status='failed',exit_code=1,checks=[dict(id='constraint',group='constraint',visibility='public',status='failed',detail='；'.join(violations))],output='修改范围不符合任务约束')
         else:
@@ -50,7 +51,9 @@ def perform(session,run):
                 for case in hidden: case['visibility']='hidden'
                 cases+=hidden
             config=folder/'config.json'; results=folder/'checks.jsonl'
-            config.write_text(json.dumps(dict(cases=cases,snapshot_dir=str(snap),results=str(results),cancel_file=str(folder/'cancelled'))))
+            image_id=json.loads((s.package(session)/'private/freeze.json').read_text())['environment'] if session['task_id'].startswith('gen_') else None
+            run['environment_image']=image_id
+            config.write_text(json.dumps(dict(cases=cases,image_id=image_id,allowed_files=w.permissions(session)['readable'],snapshot_dir=str(snap),results=str(results),cancel_file=str(folder/'cancelled'))))
             env={k:v for k,v in os.environ.items() if k not in ('MODEL_API_KEY',)}
             env['AGENTLAB_GRADE_CONFIG']=str(config)
             env['AGENTLAB_RUN_ID']=run['id']
@@ -73,7 +76,7 @@ def perform(session,run):
                     run['status']='passed' if run['exit_code']==0 and all(c['status']=='passed' for c in run['checks']) else 'failed'
             if any(c['status']=='timeout' for c in run['checks']): run['status']='timeout'
             run['output']=f"已完成 {len(run['checks'])}/{len(cases)} 项可信行为检查；"+ ('全部通过' if run['status']=='passed' else '存在失败、错误或未完成检查')
-            run['checks'].append(dict(id='modification-scope',group='constraint',visibility='public',status='passed',detail='仅执行允许的 solution.py；受保护函数外代码与原任务一致。' if session['task_id']!='rag' else '仅执行允许的 solution.py；重排与过滤约束由行为检查验证。'))
+            run['checks'].append(dict(id='modification-scope',group='constraint',visibility='public',status='passed',detail='只执行任务清单列出的文件，固定运行资产与任务版本一致；业务行为由行为检查验证。' if session['task_id']=='rag_versioning' or session['task_id'].startswith('gen_') else ('仅执行允许的 solution.py；受保护函数外代码与原任务一致。' if session['task_id']!='rag' else '仅执行允许的 solution.py；重排与过滤约束由行为检查验证。')))
     except Exception as exc:
         run.update(status='error',output=f'执行器错误：{type(exc).__name__}: {str(exc)[:300]}')
     finally:

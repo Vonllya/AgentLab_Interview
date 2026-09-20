@@ -1,0 +1,41 @@
+{
+  "id": "rag_versioning",
+  "version": "1.0.0",
+  "title": "知识库更新后的旧版本污染",
+  "tags": [
+    "进阶",
+    "RAG",
+    "SQLite",
+    "版本一致性"
+  ],
+  "minutes": 55,
+  "estimate": "45–60 分钟（设计估计，待试用校准）",
+  "level": "advanced",
+  "brief": "客服知识库更新部分政策后，问答助手仍偶尔引用旧规则。程序没有异常，引用的片段也确实存在。请调查导入、索引、检索与上下文组装，修复问题并提交验证依据。\n契约：document_id 稳定标识逻辑文档；version 为整数；每次提供完整正文。更高版本应替换该文档全部旧片段；同版本相同内容重复导入幂等，同版本不同内容不在输入域；低版本忽略；更新不得影响其他文档。空正文的新版本表示无可检索片段，须保留版本信息拒绝旧版本。关闭重开索引后结果一致。\n保留公开模块接口、SQLite documents/chunks 表协议以及词项评分、固定排序和上下文引用对应关系；不得通过关闭检索或丢弃无关文档规避。正文按非空行切分，query 按空白分词、匹配数计分，排序为 score 降序和 document_id/version/position 升序。\n只读 scenario(data) 接受 actions（import、query、reopen）；查询 limit 为正整数。每次调用使用独立临时索引。返回查询答案、引用、版本与片段集合，诊断轨迹仅辅助调查。可修改五个业务模块，不可修改统一入口或测试。第一版不考察并发写、崩溃事务恢复、非法输入或生产级分布式一致性。",
+  "readable": [
+    "solution.py",
+    "pipeline.py",
+    "ingestion.py",
+    "index_store.py",
+    "retrieval.py",
+    "context_builder.py"
+  ],
+  "editable": [
+    "pipeline.py",
+    "ingestion.py",
+    "index_store.py",
+    "retrieval.py",
+    "context_builder.py"
+  ],
+  "runtime": [
+    "solution.py"
+  ],
+  "private_assets": [
+    "private/hidden_cases.json",
+    "private/normal/",
+    "private/reference/",
+    "private/hints.json",
+    "private/rubric.json"
+  ],
+  "environment": "Python 3.10.16 / 标准库 sqlite3；无 embedding、模型、外部网络；固定输入与词项匹配；每次 scenario 独立临时目录。"
+}

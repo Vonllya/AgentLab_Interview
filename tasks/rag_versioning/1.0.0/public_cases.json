@@ -1,0 +1,207 @@
+[
+  {
+    "id": "version-initial",
+    "contract": "versioned_index",
+    "group": "regression",
+    "coverage": "首次导入与正常检索",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "refund",
+          "version": 1,
+          "body": "退款 政策 旧规则 7天\n旧票据 线下凭证"
+        },
+        {
+          "op": "import",
+          "document_id": "warranty",
+          "version": 4,
+          "body": "保修 独立规则 365天"
+        },
+        {
+          "op": "query",
+          "query": "退款",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "退款",
+          "answer": "退款 政策 旧规则 7天",
+          "citations": [
+            {
+              "chunk_id": "refund:1:0",
+              "document_id": "refund",
+              "version": 1
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "refund": 1,
+        "warranty": 4
+      },
+      "chunks": [
+        {
+          "chunk_id": "refund:1:0",
+          "document_id": "refund",
+          "version": 1,
+          "position": 0,
+          "text": "退款 政策 旧规则 7天"
+        },
+        {
+          "chunk_id": "refund:1:1",
+          "document_id": "refund",
+          "version": 1,
+          "position": 1,
+          "text": "旧票据 线下凭证"
+        },
+        {
+          "chunk_id": "warranty:4:0",
+          "document_id": "warranty",
+          "version": 4,
+          "position": 0,
+          "text": "保修 独立规则 365天"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-update",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "更高版本完整正文更新后查询",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "refund",
+          "version": 1,
+          "body": "退款 政策 旧规则 7天\n旧票据 线下凭证"
+        },
+        {
+          "op": "import",
+          "document_id": "warranty",
+          "version": 4,
+          "body": "保修 独立规则 365天"
+        },
+        {
+          "op": "import",
+          "document_id": "refund",
+          "version": 2,
+          "body": "退款 政策 新规则 30天"
+        },
+        {
+          "op": "query",
+          "query": "退款",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "退款",
+          "answer": "退款 政策 新规则 30天",
+          "citations": [
+            {
+              "chunk_id": "refund:2:0",
+              "document_id": "refund",
+              "version": 2
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "refund": 2,
+        "warranty": 4
+      },
+      "chunks": [
+        {
+          "chunk_id": "refund:2:0",
+          "document_id": "refund",
+          "version": 2,
+          "position": 0,
+          "text": "退款 政策 新规则 30天"
+        },
+        {
+          "chunk_id": "warranty:4:0",
+          "document_id": "warranty",
+          "version": 4,
+          "position": 0,
+          "text": "保修 独立规则 365天"
+        }
+      ]
+    }
+  },
+  {
+    "id": "version-unrelated",
+    "contract": "versioned_index",
+    "group": "target",
+    "coverage": "更新后无关文档保持不变",
+    "input": {
+      "actions": [
+        {
+          "op": "import",
+          "document_id": "refund",
+          "version": 1,
+          "body": "退款 政策 旧规则 7天\n旧票据 线下凭证"
+        },
+        {
+          "op": "import",
+          "document_id": "warranty",
+          "version": 4,
+          "body": "保修 独立规则 365天"
+        },
+        {
+          "op": "import",
+          "document_id": "refund",
+          "version": 2,
+          "body": "退款 政策 新规则 30天"
+        },
+        {
+          "op": "query",
+          "query": "保修",
+          "limit": 1
+        }
+      ]
+    },
+    "expected": {
+      "queries": [
+        {
+          "query": "保修",
+          "answer": "保修 独立规则 365天",
+          "citations": [
+            {
+              "chunk_id": "warranty:4:0",
+              "document_id": "warranty",
+              "version": 4
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "refund": 2,
+        "warranty": 4
+      },
+      "chunks": [
+        {
+          "chunk_id": "refund:2:0",
+          "document_id": "refund",
+          "version": 2,
+          "position": 0,
+          "text": "退款 政策 新规则 30天"
+        },
+        {
+          "chunk_id": "warranty:4:0",
+          "document_id": "warranty",
+          "version": 4,
+          "position": 0,
+          "text": "保修 独立规则 365天"
+        }
+      ]
+    }
+  }
+]

@@ -3,6 +3,9 @@ import importlib.util
 import json
 import sys
 
+# Standard library paths stay first; /workspace contains only server-validated task files.
+sys.path.append('/workspace')
+
 try:
     spec = importlib.util.spec_from_file_location('solution', '/workspace/solution.py')
     module = importlib.util.module_from_spec(spec)

@@ -4,13 +4,17 @@ from . import storage as s
 
 BOUNDARIES = [
     '范围检查只证明允许文件/受保护代码范围约束；是否实际修改须看 diff，不证明功能正确。',
-    '只有 status=passed 的行为检查支持其已列场景；失败样例不能排除未验证的过滤或其他场景。',
+    '只有 status=passed 的行为检查支持其已列场景；失败样例不能排除未验证的其他场景。',
     '代码分析是推断，不是执行观察；测试接受行为等价的多种实现，不要求区分正确方案或匹配参考补丁。',
 ]
 
 
 def public_coverage(task, case):
     data=case['input']
+    if task.startswith('gen_'):
+        return {'summary':case['coverage'],'trust':'作者已审核的模型生成结构化检查；仅本次样例，不代表整个领域能力'}
+    if task=='rag_versioning':
+        return {'summary':case['coverage'],'not_proven':'仅此固定样例，不证明整个 RAG 系统可靠；诊断轨迹非通过证明'}
     if task=='rag':
         order=data['order']; n=len(data['documents'])
         selected=sorted(order)
@@ -39,11 +43,13 @@ def run_evidence(session, run):
         if scope:
             item.update(coverage={'summary':'允许修改范围'},detail='范围约束检查，不是功能检查',
                         supports='仅范围约束成立' if check.get('status')=='passed' else '范围约束未满足',
-                        does_not_prove=['代码确实发生修改','重排正确','过滤正确'])
+                        does_not_prove=['代码确实发生修改',*(['重排正确','过滤正确'] if session['task_id']=='rag' else ['任务功能正确','未覆盖场景通过'])])
         else:
             item['coverage']=public_coverage(session['task_id'],public[check['id']]) if check.get('visibility')=='public' and check['id'] in public else {'summary':'具体覆盖未知（未公开）'}
             item['detail']=check.get('detail','')[:1000] if check.get('visibility')=='public' else '仅提供隐藏行为检查状态；不提供输入、源码或异常细节'
             item['supports']={'passed':'仅所列样例行为通过','failed':'存在行为反例；不能排除其他问题'}.get(check.get('status'),'尚无通过结论')
+        if check.get('visibility')=='public' and 'diagnostic_trace' in check:
+            item['diagnostic_trace']=check['diagnostic_trace']
         checks.append(item)
     return {**{k:run.get(k) for k in ('id','snapshot','kind','status','exit_code','duration')},
             'checks':checks,'interpretation_limits':BOUNDARIES}

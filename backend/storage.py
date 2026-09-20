@@ -28,7 +28,12 @@ def init():
         db.execute('CREATE TABLE IF NOT EXISTS objects (kind TEXT, id TEXT PRIMARY KEY, session TEXT, body TEXT)')
     for path in TASKS.glob('*/1.0.0/manifest.json'):
         task = json.loads(path.read_text())
+        task.pop('private_assets',None)
         put('task', task['id'], task)
+    from .generation import recover
+    recover()
+    for path in sorted((DATA/'published').glob('gen_*/*/manifest.json'),key=lambda p:tuple(int(n) for n in p.parent.name.split('.'))):
+        task=json.loads(path.read_text());put('task',task['id'],task)
     for run in all_objects('run'):
         if run['status'] in ('queued', 'running'):
             from .executor import cleanup_run
@@ -73,4 +78,10 @@ def event(session, role, content, **extra):
 
 
 def package(session):
-    return TASKS / session['task_id'] / session['version']
+    return (DATA/'published' if session['task_id'].startswith('gen_') else TASKS) / session['task_id'] / session['version']
+
+
+def public_manifest(session):
+    manifest=json.loads((package(session)/'manifest.json').read_text())
+    manifest.pop('private_assets',None)
+    return manifest
