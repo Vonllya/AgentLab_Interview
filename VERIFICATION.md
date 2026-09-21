@@ -1077,3 +1077,58 @@ git diff --check
 - 一次真实诊断：隔离记录 `0aa2cb503c474c3c9625a3e2bcc9c4ee`，deepseek-v4-flash、HTTP200、stop，输入25386/输出681 token，总26067。模型选择 implementation/faulty，指出三个正常回归失败，保留normal/reference/warn_only，提案结构及权限校验通过。没有执行任何修复或新矩阵。
 - 人工质量限制：模型自由文本提出恢复重试循环，与冻结故障“跳过循环”仍可能矛盾，并存在空清单原因的过度归因；权限合规不能证明具体修法正确。自由诊断文本原本不会直接作为构建指令，本轮维持该边界。未声称原项目已生成成功；后续修复仍需实际验证。本轮未实现无进展识别、调整修复优先级或增加预算。
 - 服务生效：确认无活动任务后优雅重启原PID2438682，新PID2464389监听8000；健康real、Docker可用。重启前后221条非task记录摘要完全一致。原资产/失败记录未修改；新真实调用只写隔离验证目录。未重跑全浏览器或全后端套件。
+
+## 2026-09-21 修复工单、冲突回传与候选执行闭环
+
+先按用户要求将修改前版本提交并推送至 origin/main：`ce02ebcf0550f8caf68ac1162923e454b7f0c2e2`（Checkpoint V0.2 generation and repair scope before handoff fixes）。本节对应其后的独立修复。未提交 `.env`、数据库或私人验证资产。
+
+### 根因与修改
+
+最近失败记录 `aed1e787af90411ea9135896a5aa0aca` 的正常版、参考版及故障触发已合格，但 `not-ready-empty-tools` 被归为 regression，与冻结故障的 backend_ready=false 诊断行为冲突。旧流程允许诊断分类和动作互相矛盾，构建反复返回原代码，没有把无效交接转换成可处理证据。
+
+新增 opt-in `repair-handoff-v1`（新任务及明确授权的新预算批次启用，历史不强迁移）：
+
+- 结构化工单只能选择 edit_code、reclassify、repair_fingerprint、review_spec、need_evidence 之一；程序核验当前失败证据、公开原文引用和允许修改的版本。模块定位是推断，不当作执行事实。
+- 构建可返回具体义务冲突或证据缺项；返回未变代码由程序识别为 unchanged_candidate。下一轮评测必须回答冲突引用并选择一致的处理分支。构建上下文不增加隐藏输入、期望或检查ID；初次独立测试上下文边界保留。
+- 修复先保存为候选，必须由匹配契约/代码/测试/指纹摘要的新执行矩阵通过后接纳。旧资产保留；候选存在时不能借旧通过矩阵发布。
+- 重复同类冲突、重复协议拒绝、执行结果无变化会停止并记录人工复核原因；仅换措辞或改代码注释不算行为进展。人工继续须提供说明。契约改版清除旧候选引用，避免覆盖新契约。
+- 作者界面展示冲突引用、缺失证据、候选状态及对应矩阵；“返回冲突”不再显示成修复成功。未增加 Agent、扩大预算、放宽 Docker 或判分门禁。
+
+### 实际命令与结果
+
+```bash
+.venv/bin/python -m pytest tests -q -o junit_family=xunit1 --junitxml=data/handoff-verification/pytest-full.xml
+.venv/bin/python -m pytest tests/test_handoff.py -q -o junit_family=xunit1 --junitxml=data/handoff-verification/pytest-handoff-binding-final.xml
+.venv/bin/python -m pytest tests/test_handoff.py -k 'not real_docker' -q -o junit_family=xunit1 --junitxml=data/handoff-verification/pytest-final-unit.xml
+.venv/bin/python -m pytest tests/test_contract_revision.py -q -o junit_family=xunit1 --junitxml=data/handoff-verification/contract-final.xml
+npm --prefix frontend run build
+AGENTLAB_REUSE_SERVER=1 AGENTLAB_BROWSER_EXECUTABLE=/tmp/agentlab-browser/chrome-linux64/chrome npm --prefix frontend run test:e2e -- --grep '工单冲突停止'
+# 现有配置，仅隔离副本；不打印配置，不发布：
+set -a; source .env; set +a
+AGENTLAB_REAL_SMOKE=1 .venv/bin/python -c "import runpy; runpy.run_path('data/handoff-verification/probe.py', run_name='__main__')"
+.venv/bin/python -m compileall -q backend/generation_handoff.py backend/generation.py backend/generation_flow.py backend/generation_roles.py backend/generation_direct.py backend/contract_revision.py
+git diff --check
+curl -sS http://127.0.0.1:8000/api/health
+```
+
+- 全后端：**210 passed、0 skipped，480.88秒**。已解析JUnit确认包括原 **18项 Docker验收、8项版本更新Docker测试**，不是仅凭退出码。全套运行后补充的摘要绑定、恢复/发布保护、模块提示和契约候选清理分别运行专项，未宣称全部最终改动后重新全跑。
+- 摘要绑定专项（含真实Docker候选门禁）：**7 passed、0 skipped，71.84秒**；最终非Docker工单专项 **8 passed、1 deselected，3.38秒**（Docker项已另行通过，不计为本次通过）；最终契约专项 **18 passed、0 skipped，20.74秒**。
+- TypeScript/Vite构建通过；仅已有大bundle警告。compileall及diff检查通过；Python仅已有Starlette/AnyIO弃用警告。
+- 浏览器新增冲突场景 **1 passed，2.0秒**：验证状态、作者证据、禁止发布、刷新恢复；采用明确的API拦截夹具，POST为0，不计为真实模型或完整训练浏览器闭环。未重跑全浏览器套件。
+- 中间失败如实保留：初始单测4过1失败因夹具累计了3次准备调用，修正夹具计数；组合回归54过1失败及定位重跑失败因Docker夹具故障版与正常版完全同字节，被现有静态门禁先拒绝，改为仅注释不同以真正验证行为等价代码被Docker门禁拒绝，未放宽验证。初次浏览器失败为status角色无可访问名称，改用其文本定位后通过。
+
+### 真实模型联调与人工核对
+
+原失败资产复制到本地隔离目录 `data/handoff-verification/isolated`，原记录不改；最多6请求、24000输出token、250000输入token、300秒、3次验证。隔离实例 `a867e6688beb4ad4876157f0f022da8a`，新矩阵 `d433a129318146f2be2f6eb871f257c3`。
+
+实际 **6次调用**：诊断 → 构建修复 → 再诊断 → 独立评测修订 → 指纹 → 教学材料。模型 deepseek-v4-flash，均HTTP200、stop；供应商usage合计输入42311、输出2595、总44906 token，reasoning_tokens未提供，不推算。
+
+第一次诊断仍提出矛盾代码修复；构建没有主动返回结构化冲突，而是返回未变代码。程序将其转换为 unchanged_candidate 冲突，第二次诊断引用该冲突并选择 reclassify。独立评测将 `not-ready-empty-tools` 从 regression 改为 target，再生成指纹并执行。人工逐项核对：**代码不变、全部输入和期望不变，只改检查分组与解释**，没有迎合实现修改期望。
+
+新矩阵 **35项检查，每项重复2次，实际70次Docker执行**；normal、reference、fault_trigger、fault_regression、evasion_rejected、no_runtime_errors、fingerprint_discriminates 全通过。故障和规避版本预期失败项用于证明门禁，而非宣称每个版本都通过测试。候选评测和指纹仅在新矩阵通过后接纳。最终 awaiting_review，**未发布，未把本次工程验证算人工批准或用户学习证据**。记录与差异见本地 `real-result.json`、`real-diff.json`（不提交私人资产）。
+
+### 生效及限制
+
+确认没有活动生成、执行或报告请求后，优雅重启后端；新PID2538024监听8000，健康返回real、docker_available=true。重启前后 **223条非task记录SHA-256完全一致**（protected-before/after.json），历史未重写。
+
+结构校验只能保证动作互斥、引用存在和范围合法，不能数学保证模型语义正确；必须依靠执行门禁、停机边界及人工审核。本例恢复验证的是冻结规范内的分类冲突，**原规范仍把启动时序问题简化为静态就绪/诊断标记，max_attempts未参与真实恢复时序**，不能声称原始启动故障领域已充分建模，也未因此批准发布。单次真实成功不证明总体生成率或稳定性。没有新增真实完整浏览器训练闭环，也未重生成其他失败题目；这些不计通过。

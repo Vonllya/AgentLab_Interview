@@ -153,7 +153,7 @@ def apply(job):
                assets={},matrix=None,revision=job.get('revision',0)+1,checkpoint='build',stage='build',error=None)
     job['confirmation']={'time':time.time(),'hash':job['contract_hash'],'source':'grounded_local_correction','review_id':audit['id'],'previous_version':version-1}
     audit.update(to_version=version,impact='rebuild_and_revalidate_all',new_hash=job['contract_hash'])
-    for key in ('review_digest','review','pending_plan','evaluation_repair','contract_clarity','contract_origin_plan','contract_issue','requirement_question','completed_diagnosis','format_error','stagnation_count','diagnostic_strategy','strategy_changed_at','diagnosis_rejections'):
+    for key in ('candidate_assets','open_conflict','review_digest','review','pending_plan','evaluation_repair','contract_clarity','contract_origin_plan','contract_issue','requirement_question','completed_diagnosis','format_error','stagnation_count','diagnostic_strategy','strategy_changed_at','diagnosis_rejections'):
         job.pop(key,None)
     g.put(job);return 'build'
 

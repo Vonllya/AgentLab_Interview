@@ -140,6 +140,7 @@ def install_bundle(job):
     prior=job.get('contract')
     if prior:
         job.setdefault('contract_history',[]).append({'origin_job':job['id'],'version':job['contract_version'],'contract':copy.deepcopy(prior),'contract_hash':job['contract_hash'],'assets':copy.deepcopy(job.get('previous_bundle_assets',{})),'matrix':copy.deepcopy(job.get('matrix')),'confirmation':copy.deepcopy(job.get('confirmation'))})
+    job.pop('candidate_assets',None);job.pop('open_conflict',None)
     job['assets']={'project_build':candidate}
     if bundle['project']:
         directory=g.root(job)/('bundle-build-'+g.s.ident());directory.mkdir()

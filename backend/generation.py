@@ -39,7 +39,7 @@ def get(id):return s.get('generation',id)
 
 
 def asset(job,stage):
-    ref=job['assets'][stage]
+    ref=job.get('candidate_assets',{}).get(stage) or job['assets'][stage]
     return json.loads((root(job)/ref/'output.json').read_text())
 
 
@@ -54,6 +54,7 @@ def public(job):
     result['diagnostic_strategy']=job.get('diagnostic_strategy')
     result['project_flow']=job.get('project_flow')
     result['role_policy']=job.get('role_policy')
+    result['handoff_version']=job.get('handoff_version')
     result['spec_reviews']=job.get('spec_reviews',[])
     result['checkpoint']=job.get('checkpoint')
     result['revision']=job.get('revision',0)
@@ -64,7 +65,7 @@ def public(job):
         result['matrix']={**job['matrix'],'checks':[{k:c.get(k) for k in ('id','version','case','group','visibility','covers','snapshot','status','duration')} for c in job['matrix']['checks']]}
     if result.get('matrix'):
         result['matrix'].pop('evasion_witnesses',None);result['matrix'].pop('fault_checks',None)
-    result['attempts']=[{k:a.get(k) for k in ('stage','attempt','status','started','finished','input_hash','output_hash','error','blind','metadata','role','role_id','role_policy','reserved_tokens','charged_tokens','usage_unknown','failure_kind')} for a in job['attempts']]
+    result['attempts']=[{k:a.get(k) for k in ('stage','attempt','status','started','finished','input_hash','output_hash','error','blind','metadata','role','role_id','role_policy','reserved_tokens','charged_tokens','usage_unknown','failure_kind','outcome')} for a in job['attempts']]
     if job.get('policy_version')=='roles-v1':
         for a in result['attempts']:
             if a.get('error'):a['error']={'category':a['error']['category'],'reason':'角色调用或资产校验失败，已记录并按预算处理'}
@@ -73,7 +74,7 @@ def public(job):
     return result
 
 
-def create(request,policy=True,direct_build=False):
+def create(request,policy=True,direct_build=False,handoff=False):
     job={'id':s.ident(),'request':request.model_dump(),'created':time.time(),'mode':agent.mode(),'status':'draft','stage':'design','contract_version':0,'confirmed_version':None,'assets':{},'attempts':[],'request_count':0,'error':None,'matrix':None}
     if policy:
         from .generation_budget import initialize,POLICY
@@ -81,6 +82,9 @@ def create(request,policy=True,direct_build=False):
     if direct_build:
         if not policy:raise ValueError('直接构建必须使用有界角色流程')
         job.update(project_flow=direct.VERSION,role_policy='consolidated-v1',stage='project_build',checkpoint='project_build')
+    if handoff:
+        from .generation_handoff import VERSION
+        job['handoff_version']=VERSION
     put(job)
     return job
 
@@ -246,6 +250,10 @@ def validate(job):
     if faults:gates['fingerprint_discriminates']=not any(c.get('fault_match') for c in checks if c['version'] in ('normal','reference'))
     matrix.update(gates=gates,passed=all(gates.values()),finished=time.time(),duration=round(time.monotonic()-start,3))
     put(job)
+    from . import generation_handoff as handoff
+    if handoff.enabled(job):
+        handoff.record_validation(job);put(job)
+        if matrix['passed']:handoff.accept_candidates(job)
     if not matrix['passed']:
         job['repair']={'stage':'build','reason':'执行验证未满足固定契约；独立测试保持不变。门禁：'+json.dumps(gates,ensure_ascii=False)+' 公开反例：'+json.dumps([c for c in checks if c['visibility']=='public' and c['status']!='passed'],ensure_ascii=False)[:3000]}
         raise ValueError('验证门禁失败：'+', '.join(k for k,v in gates.items() if not v)+'；若契约/期望矛盾，请人工修改契约并重新确认，不能迎合参考实现改期望')
@@ -362,7 +370,7 @@ def cancel(id):
 def review_assets(id):
     from .generation_reliability import author_summary
     job=get(id)
-    return {'summary':author_summary(job),'job':public(job),'contract_history':job.get('contract_history',[]),'contract_reviews':job.get('contract_reviews',[]),'review_digest':job.get('review_digest'),'diagnoses':job.get('diagnoses',[]),'failure_history':job.get('failure_history',[]),'asset_revisions':job.get('asset_revisions',[]),'validation_history':job.get('validation_history',[]),'contract_private_requirements':job.get('private_fault_requirements'),'matrix':job.get('matrix'),'assets':{name:asset(job,name) for name in job['assets']},'trust':'仅作者审核页面；不要将私有材料复制到训练 Agent。测试为模型提出的标准，仍需作者逐项审核。'}
+    return {'evidence_request':job.get('evidence_request'),'handoff_conflicts':job.get('handoff_conflicts',[]),'candidate_history':job.get('candidate_history',[]),'candidate_assets':job.get('candidate_assets',{}),'handoff_rejections':job.get('handoff_rejections',[]),'summary':author_summary(job),'job':public(job),'contract_history':job.get('contract_history',[]),'contract_reviews':job.get('contract_reviews',[]),'review_digest':job.get('review_digest'),'diagnoses':job.get('diagnoses',[]),'failure_history':job.get('failure_history',[]),'asset_revisions':job.get('asset_revisions',[]),'validation_history':job.get('validation_history',[]),'contract_private_requirements':job.get('private_fault_requirements'),'matrix':job.get('matrix'),'assets':{name:asset(job,name) for name in job['assets']},'trust':'仅作者审核页面；不要将私有材料复制到训练 Agent。测试为模型提出的标准，仍需作者逐项审核。'}
 
 
 def publish(id,approved,note,review_digest):
@@ -370,6 +378,7 @@ def publish(id,approved,note,review_digest):
         job=get(id)
         if job['status']=='published':return {'task_id':job['published_task'],'version':job.get('published_version','1.0.0')}
         if job['status']!='awaiting_review' or not (job.get('matrix') or {}).get('passed'):raise ValueError('未通过验证与教学阶段，禁止发布')
+        if job.get('candidate_assets'):raise ValueError('仍有未接受的候选资产，禁止发布')
         if not approved or len(note.strip())<10 or review_digest!=job['review_digest']:raise ValueError('需审核当前冻结资产并记录至少10字审核依据')
         expected=digest({'contract':job['contract_hash'],'assets':{k:digest(asset(job,k)) for k in review_keys(job)},'matrix':job['matrix']})
         if expected!=review_digest:raise ValueError('审核后资产已变化')

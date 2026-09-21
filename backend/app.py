@@ -125,7 +125,7 @@ class Publish(Strict):
 def generation_jobs():return [g.public(j) for j in s.all_objects('generation')]
 
 @app.post('/api/generation/jobs')
-def generation_create(body:GenerationRequest):return g.public(g.create(body,direct_build=True))
+def generation_create(body:GenerationRequest):return g.public(g.create(body,direct_build=True,handoff=True))
 
 @app.get('/api/generation/jobs/{id}')
 def generation_job(id:str):return g.public(g.get(id))

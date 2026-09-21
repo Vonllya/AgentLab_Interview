@@ -86,3 +86,13 @@ POST `/api/generation/jobs/{id}/requirement-answer`：`expected_revision`、`que
 规范审查纠错补充（2026-09-20）：引用校验失败使用 `ReviewEvidenceError`，将 `validation_feedback` 同时保存于 attempt.error、failure_history.error 和仅同阶段使用的 format_error。反馈绑定 contract_hash，包含 output_rules 的字段位置、对应输出路径、原引用、最多两个候选公开来源路径/原文片段以及文本差异；一次最多8条并显式报告遗漏数。下一次 spec_review 的实际输入携带完整结构化反馈，不受错误摘要1500/1800字符截断影响。旧契约反馈不注入新契约；不传给构建或独立测试阶段。候选文本相似度只用于定位，不替代逐字连续引用校验，不证明语义充分，缺少公开规则仍应返回 revise。历史失败资产不重写。
 
 程序修复范围（2026-09-20）：`repair_scope` 根据当前执行矩阵生成 failed_gates、allowed_code_variants、protected_code_variants、unverified_code_variants，以及逐版本 unmet_requirements/must_preserve。fault_trigger 与 fault_regression 为独立义务；规避候选只有目标失败、至少一个回归通过且无运行错误才合格，合格表示禁止继续修改，不表示实现正确。无证据不标记合格。该清单进入失败分析上下文，并随已校验诊断提案保存；构建修复仅获得授权版本的义务摘要，不传隐藏检查ID或输入。服务器校验诊断目标和返回资产，拒绝当前合格版本及过期矩阵；已有无gates的旧记录沿用历史校验兼容路径，新执行矩阵始终具备gates。评测/契约异议仍使用原审核流程，范围许可不等于实现根因已确定，也不允许自动改期望。本轮不改变修复优先级、无进展处理或预算。
+
+`repair-handoff-v1` 新字段：
+- `handoff_version`：新任务/新预算批次启用，不回写历史实例。
+- 诊断 `work_order`：互斥 `action`，执行检查与公开行为引用 `evidence`，对当前冲突的 `resolutions`。分类动作必须带 case_id/before/after/design_quote/rationale；不能夹带代码目标或修改 expected。
+- 构建返回 `BuildDecision.result`：modified 含文件映射；constraint_conflict 含两项真实义务引用；insufficient_evidence 含缺项与建议验证。模块提示必须属于契约文件，明确标记为诊断推断。
+- `handoff_conflicts`、`open_conflict`：矩阵ID、语义证据摘要、冲突双方、时间与稳定签名；`handoff_rejections` 保存拒绝原因。自由文本不作为语义正确性证明。
+- `candidate_assets`、`candidate_history`：候选资产引用和 pending/rejected/passed/accepted 状态，绑定验证矩阵。`assets` 保留接受前版本；晋升须校验完整通过矩阵的摘要，不接受旧结果证明新资产。
+- `needs_manual_review`：非运行状态，界面说明停止原因；作者入口显示私有冲突和候选，公开任务与训练上下文不暴露它们。`evidence_request` 保存尚缺证据及建议验证。
+
+工单权限与语义校验各有边界：程序能阻止动作混写、过期引用、越权文件/版本及未验证候选发布，不能自动证明模型的因果解释。冲突能被正确路由、候选能实际通过本轮检查，也不代表整个训练题设计已经符合用户意图，发布仍需人工审核。

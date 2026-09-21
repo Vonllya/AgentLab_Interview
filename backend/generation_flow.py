@@ -6,7 +6,7 @@ import threading
 import time
 from pydantic import ValidationError
 from . import generation as g, generation_budget as budget, generation_roles as roles, generation_diagnostics as diagnostics, contract_revision as contracts, agent, storage as s
-from . import generation_protocol as protocol, generation_direct as direct
+from . import generation_protocol as protocol, generation_direct as direct, generation_handoff as handoff
 from .generation_schema import Contract,Project,validate_project,Teaching,Request
 
 STATES={'project_build':'building','spec_review':'reviewing_spec','design':'analyzing','build':'building','evaluation':'evaluating','fingerprint':'evaluating','diagnosis':'diagnosing','repair_build':'repairing_build','validation':'validating','teaching':'teaching','contract_review':'clarifying_contract','contract_check':'checking_contract','contract_apply':'checking_contract'}
@@ -21,6 +21,10 @@ def check(job):
 
 
 def save_candidate(job,stage,output,directory):
+    if handoff.enabled(job) and job.get('matrix') and stage in ('build','evaluation','fingerprint'):
+        (directory/'output.json').write_text(json.dumps(output,ensure_ascii=False))
+        handoff.stage_candidate(job,stage,directory.name);job['revision']=job.get('revision',0)+1
+        return
     old=job['assets'].get(stage)
     if old:job.setdefault('asset_revisions',[]).append({'stage':stage,'asset':old,'hash':g.digest(g.asset(job,stage)),'replaced_at':time.time()})
     (directory/'output.json').write_text(json.dumps(output,ensure_ascii=False))
@@ -62,7 +66,13 @@ def call(job,stage):
         if stage=='project_build':parsed=direct.validate_bundle(job,parsed)
         if stage=='spec_review':parsed=direct.validate_review(job,parsed)
         if stage=='build':validate_project(Project.model_validate(parsed),Contract.model_validate(job['contract']))
-        if stage=='repair_build':parsed=diagnostics.merge_repair(job,parsed)
+        if stage=='repair_build':
+            parsed=handoff.builder_result(job,parsed) if handoff.enabled(job) else diagnostics.merge_repair(job,parsed)
+            if parsed is None:
+                audit.update(status='completed',finished=time.time(),metadata=meta,outcome='returned_to_diagnosis')
+                (directory/'output.json').write_text(json.dumps(raw,ensure_ascii=False))
+                job.pop('active_action',None);g.put(job)
+                return {'handoff_return':True}
         if stage=='evaluation':
             if direct.enabled(job) and job.get('evaluation_repair'):
                 if parsed['decision']!='patch':
@@ -73,7 +83,7 @@ def call(job,stage):
                 if protocol.enabled(job) and job.get('evaluation_repair'):parsed=protocol.merge_patch(job,parsed)
                 parsed=diagnostics.validate_evaluation_revision(job,parsed)
         if stage=='fingerprint':parsed=protocol.validate_faults(job,parsed)
-        if stage=='diagnosis':parsed=diagnostics.validate_plan(job,parsed)
+        if stage=='diagnosis':parsed=handoff.validate_order(job,parsed) if handoff.enabled(job) else diagnostics.validate_plan(job,parsed)
         if stage=='contract_review':parsed=contracts.validate_proposal(job,parsed)
         if stage=='contract_check':parsed=contracts.validate_check(job,parsed)
         audit.update(status='completed',finished=time.time(),output_hash=g.digest(parsed),metadata=meta)
@@ -133,6 +143,9 @@ def invalidate(job):
 
 def finish_asset(job,stage):
     invalidate(job)
+    if handoff.enabled(job) and stage=='evaluation' and protocol.enabled(job) and job.get('candidate_assets',{}).get('evaluation'):
+        job.pop('evaluation_repair',None);job.pop('pending_plan',None);g.put(job)
+        return 'fingerprint'
     if stage=='evaluation' and protocol.enabled(job) and 'fingerprint' in job['assets']:
         job.setdefault('asset_revisions',[]).append({'stage':'fingerprint','asset':job['assets'].pop('fingerprint')})
     job.pop('evaluation_repair',None);job.pop('pending_plan',None)
@@ -161,6 +174,8 @@ def run(id,start):
                     break
                 if stage in ('build','evaluation','repair_build','fingerprint'):
                     result=call(job,stage)
+                    if stage=='repair_build' and result.get('handoff_return'):
+                        stage='diagnosis';continue
                     if stage=='evaluation' and result.get('decision') in ('specification_issue','reject_plan'):
                         job.pop('evaluation_repair',None)
                         stage='spec_review' if result['decision']=='specification_issue' else 'diagnosis'
@@ -173,6 +188,8 @@ def run(id,start):
                 if stage=='diagnosis':
                     plan=job.pop('completed_diagnosis',None) or call(job,'diagnosis');job['repair_round']=job.get('repair_round',0)+1
                     job['progress_reason']={'category':plan['category'],'behaviors':plan['contract_behavior_ids'],'matrix_id':plan['matrix_id']}
+                    if handoff.enabled(job) and plan.get('work_order',{}).get('action',{}).get('kind')=='need_evidence':
+                        job['evidence_request']=plan['work_order']['action'];raise handoff.NeedsReview('工单缺少必要证据，已记录具体缺项与建议验证；不凭猜测修改或自动重复调用。')
                     clear=(job.get('contract_clarity') or {}).get('contract_hash')==job['contract_hash']
                     if plan['evaluation_action']=='expectation' and clear:
                         job['evaluation_repair']={**plan,'contract_grounded':job['contract_hash']};job['evaluation_review_guided']=True;stage='evaluation';g.put(job);continue
@@ -207,10 +224,12 @@ def run(id,start):
                     job['review_digest']=g.digest({'contract':job['contract_hash'],'assets':{k:g.digest(g.asset(job,k)) for k in g.review_keys(job)},'matrix':job['matrix']})
                     break
                 raise ValueError('未知协调器检查点')
+            except handoff.NeedsReview:raise
             except budget.Exhausted:raise
             except InterruptedError:raise
             except Exception as exc:
                 reason=failure(job,stage,exc)
+                if handoff.enabled(job) and not isinstance(exc,agent.ModelFailure):handoff.rejection_guard(job,stage,exc)
                 if reason['category'] in ('authentication','permission','configuration'):
                     job['status']='waiting_provider';break
                 if reason['category'] in ('rate_limit','provider_http','connection'):
@@ -228,6 +247,8 @@ def run(id,start):
                     job['preflight_review']=True;stage='spec_review';g.put(job)
                 elif stage in ('repair_build','evaluation','fingerprint') and job.get('matrix') and len([f for f in job['failure_history'][-2:] if f['stage']==stage])==2:
                     stage='diagnosis'
+    except handoff.NeedsReview as exc:
+        job.update(status='needs_manual_review',error={'category':'handoff_conflict','reason':str(exc)})
     except budget.Exhausted as exc:
         job.update(status='budget_exhausted',error={'category':'budget_exhausted','reason':str(exc)})
     except InterruptedError:
@@ -241,7 +262,8 @@ def run(id,start):
 
 def resume(id,note=''):
     job=g.get(id)
-    if job['status'] not in ('interrupted','waiting_environment','waiting_provider','awaiting_contract_review','no_progress'):raise ValueError('当前状态需要明确创建新预算批次')
+    if job['status'] not in ('interrupted','waiting_environment','waiting_provider','awaiting_contract_review','no_progress','needs_manual_review'):raise ValueError('当前状态需要明确创建新预算批次')
+    if job['status']=='needs_manual_review' and len(note.strip())<10:raise ValueError('请先在作者审核中核对冲突并提供新的依据，不能原样恢复自动循环')
     if job['status']=='awaiting_contract_review' and len(note.strip())<10:raise ValueError('请先核对作者诊断并提供至少10字修复依据，或确认新契约')
     if note:job['repair_note']=note[:2000]
     # Old transient schema guidance must not re-impose the rolled-back protocol.
@@ -253,7 +275,7 @@ def resume(id,note=''):
     elif direct.enabled(job) and stage=='spec_review' and job.get('attempts') and job['attempts'][-1]['stage']==stage and job['attempts'][-1]['status']=='completed':
         stage=direct.apply_review(job)
         if stage is None:return g.public(job)
-    elif job['status'] in ('awaiting_contract_review','no_progress'):stage='diagnosis'
+    elif job['status'] in ('awaiting_contract_review','no_progress','needs_manual_review'):stage='diagnosis'
     elif stage=='design' and 'design' in job['assets']:
         design=g.asset(job,'design');job.update(contract=design['contract'],assessment=design['assessment'],rationale=design['rationale'],questions=design['questions'],private_fault_requirements=design['private_fault_requirements'],status='awaiting_contract',error=None)
         if design['contract']:job['contract_version']+=1;job['contract_hash']=g.digest(design['contract'])
@@ -267,7 +289,9 @@ def resume(id,note=''):
         completed=job['attempts'] and job['attempts'][-1]['stage']==stage and job['attempts'][-1]['status']=='completed'
         if completed:
             saved=json.loads((g.root(job)/job['attempts'][-1]['asset']/'output.json').read_text())
-            if direct.enabled(job) and stage=='evaluation' and saved.get('decision') in ('reject_plan','specification_issue'):
+            if handoff.enabled(job) and stage=='repair_build' and job['attempts'][-1].get('outcome')=='returned_to_diagnosis':
+                stage='diagnosis'
+            elif direct.enabled(job) and stage=='evaluation' and saved.get('decision') in ('reject_plan','specification_issue'):
                 job.pop('evaluation_repair',None);stage='spec_review' if saved['decision']=='specification_issue' else 'diagnosis'
             else:stage=next_after_asset(job) if stage=='teaching' else finish_asset(job,stage)
     elif stage=='validation' and (job.get('matrix') or {}).get('passed'):stage=next_after_asset(job)
@@ -304,7 +328,8 @@ def regenerate(id,body):
         child['inherited_failure']=source.get('error');child['inherited_matrix_id']=(source.get('matrix') or {}).get('id')
         # Copy immutable selected assets, never edit parent directories/records.
         import shutil
-        refs=set(child['assets'].values())
+        child['handoff_version']=handoff.VERSION
+        refs=set(child['assets'].values())|set(child.get('candidate_assets',{}).values())
         if child.get('evaluation_candidate'):refs.add(child['evaluation_candidate']['asset'])
         refs.update(child[k]['asset'] for k in ('contract_candidate','contract_decision') if child.get(k))
         for ref in refs:shutil.copytree(g.root(source)/ref,g.root(child)/ref)
