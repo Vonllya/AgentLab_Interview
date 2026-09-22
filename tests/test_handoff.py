@@ -23,7 +23,7 @@ def prepared():
 
 def order(j):
     behavior=next(iter(j['contract']['behaviors']))
-    return {'action':{'kind':'edit_code','variants':['faulty'],'approach':'只修复尚未通过的回归，同时保留冻结故障与其他版本。'},
+    return {'action':{'kind':'edit_code','variants':['faulty'],'edits':[{'variant':'faulty','path':'app.py','location':'scenario入口','current_behavior':'当前回归分支未满足公开行为要求。','intended_behavior':'修改未受故障影响分支，使回归行为符合契约。','must_preserve':'指定故障在原触发条件下继续出现，其他版本保持不变。'}]},
             'evidence':[{'check_ids':[next(c['id'] for c in j['matrix']['checks'] if c['version']=='faulty')],
                          'behavior_id':behavior,'quote':j['contract']['behaviors'][behavior]}],'resolutions':[]}
 
@@ -34,9 +34,9 @@ def test_mutually_exclusive_actions_and_evidence(client):
     with pytest.raises(ValidationError):h.validate_order(j,bad)
     bad=copy.deepcopy(raw);bad['evidence'][0]['quote']='不存在的公开原文'
     with pytest.raises(ValueError,match='公开行为'):h.validate_order(j,bad)
-    bad=copy.deepcopy(raw);bad['action']['variants']=['normal']
+    bad=copy.deepcopy(raw);bad['action']['variants']=['normal'];bad['action']['edits'][0]['variant']='normal'
     with pytest.raises(ValueError,match='禁止修改'):h.validate_order(j,bad)
-    bad=copy.deepcopy(raw);bad['action']['suspected_files']=['../private.py']
+    bad=copy.deepcopy(raw);bad['action']['edits'][0]['path']='../private.py'
     with pytest.raises(ValueError,match='契约允许'):h.validate_order(j,bad)
     p=h.validate_order(j,raw);assert p['category']=='implementation' and p['target_variants']==['faulty']
     j['pending_plan']=p;ctx=roles.context(j,'repair_build')
@@ -122,7 +122,7 @@ def test_insufficient_evidence_requires_named_obligation(client):
     with pytest.raises(ValueError,match='真实工单义务'):h.builder_result(j,reply)
     reply['result']['requirement_refs']=['requirement:faulty:all_regression_checks_pass']
     assert h.builder_result(j,reply) is None
-    raw=order(j);raw['action']={'kind':'need_evidence','missing':reply['result']['missing'],'proposed_verification':reply['result']['proposed_verification']}
+    raw=order(j);raw['action']={'kind':'need_evidence','missing':reply['result']['missing'],'proposed_verification':reply['result']['proposed_verification'],'requests':[{'kind':'file','variant':'faulty','path':'app.py','question':'确认故障入口调用'}]}
     raw['resolutions']=[{'conflict_id':j['open_conflict']['id'],'disposition':'insufficient_evidence','explanation':'需要核对完整回归与故障范围的关系，再决定代码修复还是分类修复。'}]
     assert h.validate_order(j,raw)['work_order']['action']['kind']=='need_evidence'
 

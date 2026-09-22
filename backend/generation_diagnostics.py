@@ -35,7 +35,7 @@ def validate_plan(job,raw):
     if plan['category'] in ('implementation','evasion') and matrix.get('gates'):
         denied=set(plan['target_variants'])-set(scope['allowed_code_variants'])
         if denied:
-            label='该规避已正确被识别；' if denied<=set(scope['protected_code_variants']) & set(p['evasions']) else '目标版本已通过门禁或证据不足（合格故障版的目标失败是预期故障）；'
+            label='该规避已正确被识别；' if denied<=set(scope['protected_code_variants']) & set(p['evasions']) else '目标版本已通过门禁或证据不足（故障注入版本应稳定触发指定错误；目标检查失败可能正是要求保留的故障，不应将其修成正常行为）；'
             raise ValueError(label+'禁止修改='+json.dumps(sorted(denied),ensure_ascii=False)+
                 '；程序允许修改='+json.dumps(scope['allowed_code_variants'],ensure_ascii=False)+
                 '；未通过门禁='+json.dumps(scope['failed_gates'],ensure_ascii=False)+'；请依据repair_scope选择未完成事项')

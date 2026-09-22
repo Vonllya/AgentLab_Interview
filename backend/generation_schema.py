@@ -38,7 +38,7 @@ class Contract(Strict):
         if 'app.py' not in self.files or len(self.files)!=len(set(self.files)):
             raise ValueError('业务文件必须含 app.py 且不重复')
         if any(not re.fullmatch('[a-z][a-z0-9_]{0,30}\\.py',n) or n in ('solution.py','os.py','sys.py','json.py','site.py') for n in self.files):
-            raise ValueError('非法或保留模块名')
+            raise ValueError('非法或保留模块名：'+', '.join(n for n in self.files if not re.fullmatch('[a-z][a-z0-9_]{0,30}\\.py',n) or n in ('solution.py','os.py','sys.py','json.py','site.py')))
         if any(not re.fullmatch('[a-z][a-z0-9_]{0,40}',n) for n in self.behaviors):raise ValueError('行为 ID 无效')
         if len(json.dumps(self.model_dump(),ensure_ascii=False))>14000:raise ValueError('契约过大')
         for schema in (self.input_schema,self.output_schema):validate_schema(schema)

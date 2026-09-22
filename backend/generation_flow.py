@@ -6,7 +6,8 @@ import threading
 import time
 from pydantic import ValidationError
 from . import generation as g, generation_budget as budget, generation_roles as roles, generation_diagnostics as diagnostics, contract_revision as contracts, agent, storage as s
-from . import generation_protocol as protocol, generation_direct as direct, generation_handoff as handoff
+from . import generation_protocol as protocol, generation_direct as direct, generation_handoff as handoff, generation_format as fmt
+from .generation_evidence import EvidenceResponseError
 from .generation_schema import Contract,Project,validate_project,Teaching,Request
 
 STATES={'project_build':'building','spec_review':'reviewing_spec','design':'analyzing','build':'building','evaluation':'evaluating','fingerprint':'evaluating','diagnosis':'diagnosing','repair_build':'repairing_build','validation':'validating','teaching':'teaching','contract_review':'clarifying_contract','contract_check':'checking_contract','contract_apply':'checking_contract'}
@@ -33,12 +34,15 @@ def save_candidate(job,stage,output,directory):
 
 
 def call(job,stage):
-    check(job);messages=roles.messages(job,stage);encoded=json.dumps(messages,ensure_ascii=False)
+    check(job);messages=fmt.messages(job,stage,roles.messages(job,stage));encoded=json.dumps(messages,ensure_ascii=False)
     with s.LOCK:
         check(job);cap=budget.reserve(job,stage,len(encoded.encode()))
         directory=g.root(job)/('call-'+s.ident());directory.mkdir(parents=True)
         (directory/'input.json').write_text(encoded)
         audit={'stage':stage,**roles.identity(job,stage),'attempt':1+sum(a['stage']==stage for a in job['attempts']),'contract_version':job['contract_version'],'input_hash':g.digest(messages),'started':time.time(),'status':'running','reserved_tokens':cap,'asset':directory.name,'blind':stage=='evaluation' and not job.get('evaluation_review_guided',False)}
+        if stage=='project_build' and job.get('format_correction'):
+            audit['format_repair_of']=job['format_correction']['asset']
+            audit['format_repair_attempt']=job['format_correction']['attempts']
         job['attempts'].append(audit);job['request_count']+=1;job.update(stage=stage,status=STATES[stage],active_action={'stage':stage,'asset':directory.name});g.put(job)
     meta={};settled=False;raw=None
     try:
@@ -96,7 +100,9 @@ def call(job,stage):
             save_candidate(job,'build' if stage=='repair_build' else stage,parsed,directory)
         else:job.setdefault('diagnoses',[]).append(parsed)
         if stage=='evaluation':job.pop('evaluation_candidate',None)
-        job.pop('active_action',None);job.pop('format_error',None);g.put(job)
+        job.pop('active_action',None);job.pop('format_error',None)
+        if stage=='project_build':job.pop('format_correction',None)
+        g.put(job)
         return parsed
     except Exception as exc:
         if stage=='evaluation' and raw is not None and not job.get('evaluation_repair') and direct.enabled(job):
@@ -105,15 +111,20 @@ def call(job,stage):
         meta=getattr(exc,'metadata',meta)
         if not settled:budget.settle(job,audit,meta)
         reason=({'category':'cancelled','reason':'调用被取消，响应不再推进资产'} if isinstance(exc,InterruptedError) else agent.model_error(exc) if isinstance(exc,agent.ModelFailure) else {'category':'asset_validation','reason':str(exc)[:1500]})
-        if isinstance(exc,direct.ReviewEvidenceError):reason['validation_feedback']=exc.feedback
-        audit['failure_kind']=(reason['category'] if isinstance(exc,agent.ModelFailure) else 'response_format' if isinstance(exc,(json.JSONDecodeError,ValidationError)) else 'diagnosis_rejected' if stage=='diagnosis' else 'patch_rejected' if job.get('evaluation_repair') or stage=='repair_build' else 'asset_invalid')
+        if isinstance(exc,(direct.ReviewEvidenceError,EvidenceResponseError)):reason['validation_feedback']=exc.feedback
+        if fmt.classify(exc):reason=fmt.classify(exc)
+        audit['failure_kind']=(reason['category'] if isinstance(exc,agent.ModelFailure) else reason['category'] if isinstance(exc,(json.JSONDecodeError,ValidationError)) else 'diagnosis_rejected' if stage=='diagnosis' else 'patch_rejected' if job.get('evaluation_repair') or stage=='repair_build' else 'asset_invalid')
         audit.update(status='outcome_unknown' if reason['category'] in ('timeout','cancelled') else 'failed',finished=time.time(),metadata=meta,error=reason)
-        job.pop('active_action',None);g.put(job);raise
+        job.pop('active_action',None)
+        try:fmt.rejected(job,stage,exc,directory.name)
+        finally:g.put(job)
+        raise
 
 
 def failure(job,stage,exc):
     reason=agent.model_error(exc) if isinstance(exc,agent.ModelFailure) else {'category':'validation' if stage=='validation' else 'asset_validation','reason':str(exc)[:1800]}
-    if isinstance(exc,direct.ReviewEvidenceError):reason['validation_feedback']=exc.feedback
+    if fmt.classify(exc):reason=fmt.classify(exc)
+    if isinstance(exc,(direct.ReviewEvidenceError,EvidenceResponseError)):reason['validation_feedback']=exc.feedback
     item={'id':s.ident(),'stage':stage,'time':time.time(),'contract_version':job['contract_version'],'matrix_id':(job.get('matrix') or {}).get('id'),'error':reason}
     job.setdefault('failure_history',[]).append(item);job['error']=reason
     # Schema errors may echo private values: keep them only in that same role's context.
@@ -189,7 +200,9 @@ def run(id,start):
                     plan=job.pop('completed_diagnosis',None) or call(job,'diagnosis');job['repair_round']=job.get('repair_round',0)+1
                     job['progress_reason']={'category':plan['category'],'behaviors':plan['contract_behavior_ids'],'matrix_id':plan['matrix_id']}
                     if handoff.enabled(job) and plan.get('work_order',{}).get('action',{}).get('kind')=='need_evidence':
-                        job['evidence_request']=plan['work_order']['action'];raise handoff.NeedsReview('工单缺少必要证据，已记录具体缺项与建议验证；不凭猜测修改或自动重复调用。')
+                        from .generation_evidence import resolve
+                        job['evidence_request']=plan['work_order']['action']
+                        resolve(job,job['evidence_request']);g.put(job);stage='diagnosis';continue
                     clear=(job.get('contract_clarity') or {}).get('contract_hash')==job['contract_hash']
                     if plan['evaluation_action']=='expectation' and clear:
                         job['evaluation_repair']={**plan,'contract_grounded':job['contract_hash']};job['evaluation_review_guided']=True;stage='evaluation';g.put(job);continue
@@ -248,7 +261,7 @@ def run(id,start):
                 elif stage in ('repair_build','evaluation','fingerprint') and job.get('matrix') and len([f for f in job['failure_history'][-2:] if f['stage']==stage])==2:
                     stage='diagnosis'
     except handoff.NeedsReview as exc:
-        job.update(status='needs_manual_review',error={'category':'handoff_conflict','reason':str(exc)})
+        job.update(status='needs_manual_review',error={'category':getattr(exc,'category','handoff_conflict'),'reason':str(exc)})
     except budget.Exhausted as exc:
         job.update(status='budget_exhausted',error={'category':'budget_exhausted','reason':str(exc)})
     except InterruptedError:
@@ -265,7 +278,9 @@ def resume(id,note=''):
     if job['status'] not in ('interrupted','waiting_environment','waiting_provider','awaiting_contract_review','no_progress','needs_manual_review'):raise ValueError('当前状态需要明确创建新预算批次')
     if job['status']=='needs_manual_review' and len(note.strip())<10:raise ValueError('请先在作者审核中核对冲突并提供新的依据，不能原样恢复自动循环')
     if job['status']=='awaiting_contract_review' and len(note.strip())<10:raise ValueError('请先核对作者诊断并提供至少10字修复依据，或确认新契约')
-    if note:job['repair_note']=note[:2000]
+    if note:
+        job['repair_note']=note[:2000]
+        if job.get('format_correction'):job['format_correction']['attempts']=0
     # Old transient schema guidance must not re-impose the rolled-back protocol.
     # failure_history/attempts remain unchanged for audit.
     if job.get('reliability_version'):job.pop('format_error',None)
@@ -281,7 +296,9 @@ def resume(id,note=''):
         if design['contract']:job['contract_version']+=1;job['contract_hash']=g.digest(design['contract'])
         g.put(job);return g.public(job)
     elif stage=='diagnosis' and job.get('attempts') and job['attempts'][-1]['stage']=='diagnosis' and job['attempts'][-1]['status']=='completed' and job.get('diagnoses'):
-        job['completed_diagnosis']=job['diagnoses'][-1]
+        last=job['diagnoses'][-1]
+        from .generation_evidence import current
+        if last.get('work_order',{}).get('action',{}).get('kind')!='need_evidence' or not current(job):job['completed_diagnosis']=last
     elif stage in ('contract_review','contract_check','contract_apply'):
         if job.get('contract_decision'):stage='contract_apply'
         elif job.get('contract_candidate'):stage='contract_check'
@@ -330,6 +347,7 @@ def regenerate(id,body):
         import shutil
         child['handoff_version']=handoff.VERSION
         refs=set(child['assets'].values())|set(child.get('candidate_assets',{}).values())
+        if child.get('format_correction'):refs.add(child['format_correction']['asset']);child['format_correction']['attempts']=0
         if child.get('evaluation_candidate'):refs.add(child['evaluation_candidate']['asset'])
         refs.update(child[k]['asset'] for k in ('contract_candidate','contract_decision') if child.get(k))
         for ref in refs:shutil.copytree(g.root(source)/ref,g.root(child)/ref)

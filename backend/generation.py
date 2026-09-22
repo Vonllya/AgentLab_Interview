@@ -12,7 +12,7 @@ from . import storage as s, agent, executor
 from .generation_schema import *
 from . import generation_protocol as protocol, generation_direct as direct
 
-ACTIVE_STATES={'reviewing_spec','analyzing','building','evaluating','validating','teaching','diagnosing','repairing_build','waiting_backoff','clarifying_contract','checking_contract'}
+ACTIVE_STATES={'gathering_evidence','probing_evidence','reviewing_spec','analyzing','building','evaluating','validating','teaching','diagnosing','repairing_build','waiting_backoff','clarifying_contract','checking_contract'}
 MAX_REQUESTS=10
 MAX_ATTEMPTS=3  # initial + at most two repairs per stage
 SCHEMAS={'design':Design,'build':Project,'evaluation':Evaluation,'teaching':Teaching}
@@ -65,7 +65,7 @@ def public(job):
         result['matrix']={**job['matrix'],'checks':[{k:c.get(k) for k in ('id','version','case','group','visibility','covers','snapshot','status','duration')} for c in job['matrix']['checks']]}
     if result.get('matrix'):
         result['matrix'].pop('evasion_witnesses',None);result['matrix'].pop('fault_checks',None)
-    result['attempts']=[{k:a.get(k) for k in ('stage','attempt','status','started','finished','input_hash','output_hash','error','blind','metadata','role','role_id','role_policy','reserved_tokens','charged_tokens','usage_unknown','failure_kind','outcome')} for a in job['attempts']]
+    result['attempts']=[{k:a.get(k) for k in ('stage','attempt','status','started','finished','input_hash','output_hash','error','blind','metadata','role','role_id','role_policy','reserved_tokens','charged_tokens','usage_unknown','failure_kind','outcome','format_repair_of','format_repair_attempt')} for a in job['attempts']]
     if job.get('policy_version')=='roles-v1':
         for a in result['attempts']:
             if a.get('error'):a['error']={'category':a['error']['category'],'reason':'角色调用或资产校验失败，已记录并按预算处理'}
@@ -93,6 +93,11 @@ def recover():
     for job in s.all_objects('generation'):
         if job['status'] in ACTIVE_STATES:
             job['status']='interrupted';job['error']={'category':'interrupted','reason':'服务重启；未完成阶段不会自动重发付费请求'}
+            for item in job.get('diagnostic_evidence',[]):
+                if item['status']=='gathering':
+                    item['status']='interrupted'
+                    for result in item['results']:
+                        if result['status'] in ('pending','running'):result['status']='interrupted'
             for a in job['attempts']:
                 if a['status']=='running':a.update(status='interrupted',finished=time.time())
             if job.get('policy_version')=='roles-v1':
@@ -370,7 +375,7 @@ def cancel(id):
 def review_assets(id):
     from .generation_reliability import author_summary
     job=get(id)
-    return {'evidence_request':job.get('evidence_request'),'handoff_conflicts':job.get('handoff_conflicts',[]),'candidate_history':job.get('candidate_history',[]),'candidate_assets':job.get('candidate_assets',{}),'handoff_rejections':job.get('handoff_rejections',[]),'summary':author_summary(job),'job':public(job),'contract_history':job.get('contract_history',[]),'contract_reviews':job.get('contract_reviews',[]),'review_digest':job.get('review_digest'),'diagnoses':job.get('diagnoses',[]),'failure_history':job.get('failure_history',[]),'asset_revisions':job.get('asset_revisions',[]),'validation_history':job.get('validation_history',[]),'contract_private_requirements':job.get('private_fault_requirements'),'matrix':job.get('matrix'),'assets':{name:asset(job,name) for name in job['assets']},'trust':'仅作者审核页面；不要将私有材料复制到训练 Agent。测试为模型提出的标准，仍需作者逐项审核。'}
+    return {'diagnostic_evidence':job.get('diagnostic_evidence',[]),'evidence_request':job.get('evidence_request'),'handoff_conflicts':job.get('handoff_conflicts',[]),'candidate_history':job.get('candidate_history',[]),'candidate_assets':job.get('candidate_assets',{}),'handoff_rejections':job.get('handoff_rejections',[]),'summary':author_summary(job),'job':public(job),'contract_history':job.get('contract_history',[]),'contract_reviews':job.get('contract_reviews',[]),'review_digest':job.get('review_digest'),'diagnoses':job.get('diagnoses',[]),'failure_history':job.get('failure_history',[]),'asset_revisions':job.get('asset_revisions',[]),'validation_history':job.get('validation_history',[]),'contract_private_requirements':job.get('private_fault_requirements'),'matrix':job.get('matrix'),'assets':{name:asset(job,name) for name in job['assets']},'trust':'仅作者审核页面；不要将私有材料复制到训练 Agent。测试为模型提出的标准，仍需作者逐项审核。'}
 
 
 def publish(id,approved,note,review_digest):

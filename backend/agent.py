@@ -95,6 +95,10 @@ def request_options(purpose='chat', retry=False):
     model=os.getenv('MODEL_NAME','gpt-4.1-mini')
     official=urlsplit(os.getenv('MODEL_BASE_URL','')).hostname=='api.deepseek.com'
     options={}
+    if purpose=='generation':
+        selected=os.getenv('GENERATION_JSON_MODE','auto')
+        if selected not in ('auto','json_object','prompt'):raise ModelFailure('configuration','GENERATION_JSON_MODE 配置无效',{})
+        if selected=='json_object' or (selected=='auto' and official):options['response_format']={'type':'json_object'}
     if purpose in ('report','generation') and official and model.startswith('deepseek-v4-'):
         options['thinking']={'type':'disabled'}
     return {'model':model,'max_tokens':(1800 if retry else 1200) if purpose=='report' else (12000 if purpose=='generation' else 4096),**options}
@@ -106,6 +110,7 @@ def completion(messages,tools=None,*,purpose='chat',retry=False,timeout=60,outpu
         if purpose!='generation' or type(output_limit) is not int or not 1<=output_limit<=12000:raise ValueError('非法生成预算')
         options['max_tokens']=output_limit
     meta={'model':options['model'],'max_tokens':options['max_tokens'],
+          'output_constraint':options.get('response_format',{'type':'prompt_only'}),
           'thinking':options.get('thinking','unspecified; provider default unknown'),
           'reasoning_effort':'unspecified','input_chars':sum(len(m.get('content') or '') for m in messages),
           'usage':{k:None for k in ('prompt_tokens','completion_tokens','total_tokens','reasoning_tokens')},

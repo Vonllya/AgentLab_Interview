@@ -1132,3 +1132,107 @@ curl -sS http://127.0.0.1:8000/api/health
 确认没有活动生成、执行或报告请求后，优雅重启后端；新PID2538024监听8000，健康返回real、docker_available=true。重启前后 **223条非task记录SHA-256完全一致**（protected-before/after.json），历史未重写。
 
 结构校验只能保证动作互斥、引用存在和范围合法，不能数学保证模型语义正确；必须依靠执行门禁、停机边界及人工审核。本例恢复验证的是冻结规范内的分类冲突，**原规范仍把启动时序问题简化为静态就绪/诊断标记，max_attempts未参与真实恢复时序**，不能声称原始启动故障领域已充分建模，也未因此批准发布。单次真实成功不证明总体生成率或稳定性。没有新增真实完整浏览器训练闭环，也未重生成其他失败题目；这些不计通过。
+
+## 2026-09-21 项目构建输出协议及有界格式纠错
+
+根因：最近10条真实构建记录9条首次被标记response_format。实际混合了JSON语法、文件映射返回字符串、保留模块名及版本约束错误；之前只有提示词Schema，没有请求层JSON模式。完整多版本代码一次输出放大了转义错误。
+
+实现：官方DeepSeek自动启用response_format=json_object（依据 https://api-docs.deepseek.com/guides/json_mode/）；其他供应商默认prompt-only，可显式配置GENERATION_JSON_MODE=json_object或prompt，不自动降级、不声称支持严格Schema。增加文件映射示例、保留名规则及接口Schema适用范围。语法/结构失败携带原响应和字段定位，在同一角色内最多两次纠正，计入原总预算；资产约束仍走内容修复。保存来源关联和调用资产；原始响应不进入独立评测。未使用宽松解析或自动补写代码。界面区分JSON语法、字段结构、资产约束及供应商响应错误，展示格式修复次数。
+
+实际命令：
+```bash
+.venv/bin/python -m pytest tests/test_generation_format.py tests/test_handoff.py tests/test_generation_direct.py tests/test_generation_flow.py tests/test_model_feedback.py -q --junitxml=data/format-verification/final.xml
+.venv/bin/python -m pytest tests/test_generation_format.py -q --junitxml=data/format-verification/unit-final.xml
+npm --prefix frontend run build
+AGENTLAB_REUSE_SERVER=1 AGENTLAB_BROWSER_EXECUTABLE=/tmp/agentlab-browser/chrome-linux64/chrome npm --prefix frontend run test:e2e -- --grep '构建错误分类'
+set -a; source .env; set +a
+.venv/bin/python -c "import runpy; runpy.run_path('data/format-verification/probe.py',run_name='__main__')"
+.venv/bin/python -c "import runpy; runpy.run_path('data/format-verification/replay.py',run_name='__main__')"
+.venv/bin/python -m compileall -q backend/generation_format.py backend/generation_flow.py
+git diff --check
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+- 相关后端套件 **60 passed、0 skipped，143.62秒**，包括交接及生成Docker流程；后续补充错误类型详情、恢复计数/来源复制、分类分流和界面审计字段后，格式专项 **5 passed、0 skipped，0.47秒**。不宣称最终所有修改后重新全跑60项，也未重跑整个仓库或原18项Docker套件。
+- 浏览器错误分类夹具 **1 passed，2.0秒**；TypeScript/Vite构建通过，仅原大bundle告警；compileall/diff检查通过。Python保留原Starlette弃用警告。
+- 首轮沙箱TestClient初始化挂起，诊断堆栈后停止本轮测试，按正常权限重跑。首轮回归50过1失败：新增隔离断言错误地在尚无契约时调用评测context；修正夹具为直接验证格式上下文不会注入其他角色，未放宽产品校验。
+- 历史3份原始响应只读重放：分别归为asset_constraint（同时包含保留模块和字段类型问题）、json_syntax、schema_shape，原资产不修改。新增脱敏回归覆盖字符串包装/散文代码、类型定位、两次纠错上限、预算计数、角色隔离、纠正成功和业务约束分流。
+- 真实同类首次构建：隔离实例99709c943a0f4079af99d788d278fbd9，deepseek-v4-flash，JSON模式，HTTP200/stop；**1次调用通过完整Bundle资产校验**，输入1971、输出3342、合计5313 token。未进入独立评测或Docker，不算生成验收成功。
+- 真实历史响应纠错：隔离实例26b61365fa014b3483649708d4934972，使用最新失败记录第3次响应，**1次纠正通过完整Bundle校验**；HTTP200/stop，输入6520、输出4085、合计10605 token。公开规范、私有故障说明完全相同；只读AST解析比较五个版本的全部代码，语法树均相同（仅结构包装/空白改变），没有宿主执行/导入代码。reasoning_tokens均未提供，不推算。原响应/输出/审计记录在忽略的data/format-verification目录，不提交私人资产。
+- 历史纠错脚本首跑因父目录未创建在模型调用前失败，修正mkdir(parents=True)后完成，未额外消耗模型调用。
+- 无活动任务后优雅重启后端，新PID2794699监听8000，健康real、Docker可用。重启前后225条非task记录摘要一致。旧记录不迁移；未知供应商/严格Schema模式未验证，单次首次成功与单次纠错成功不能统计为稳定性或生成率提升。未发布新任务，未做完整真实生成/训练闭环。
+
+## 2026-09-21 缺证据请求的程序化检索与有界补充验证
+
+根因：最新实例df53b954b90c4bf6946e4844c9726818虽已提供代码和执行矩阵，模型仍请求确认fetch_tools及故障入口；旧调度对need_evidence直接抛handoff_conflict。此次修改程序调度，不仅改提示词：结构化请求/权限验证 → 查找当前资产证据 → 必要的固定场景Docker实验 → 下一轮诊断必须按证据ID回应。两轮/两次实验及原全局预算同时限制；重复请求、旧检查、路径越权、未知场景和环境不可用分别处理。原矩阵、期望、指纹及发布门禁未放宽。
+
+实际执行：
+```bash
+.venv/bin/python -m pytest tests/test_generation_evidence.py tests/test_handoff.py tests/test_generation_flow.py -q --junitxml=data/evidence-verification/tests.xml
+.venv/bin/python -m pytest tests/test_generation_evidence.py tests/test_handoff.py -q --junitxml=data/evidence-verification/final.xml
+.venv/bin/python -m pytest tests/test_generation_evidence.py -q --junitxml=data/evidence-verification/resume-final.xml
+npm --prefix frontend run build
+AGENTLAB_REUSE_SERVER=1 AGENTLAB_BROWSER_EXECUTABLE=/tmp/agentlab-browser/chrome-linux64/chrome npm --prefix frontend run test:e2e -- --grep '证据暂停分类'
+set -a; source .env; set +a
+.venv/bin/python -c "import runpy; runpy.run_path('data/evidence-verification/probe.py',run_name='__main__')"
+.venv/bin/python -m compileall -q backend
+git diff --check
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+- 第一轮相关回归 **33 passed、0 skipped，102.90秒**；补充协调器、恢复及明确回应校验后的专项 **16 passed、0 skipped，63.67秒**；最终输入校验、记录耗时及恢复避免重复处理后的证据专项 **8 passed、0 skipped，5.36秒**。这些不是三个独立全套，不相加声称57项。包含实际Docker诊断实验和原交接Docker门禁。覆盖已有证据零执行复用、路径/命令限制、旧证据隔离、逐ID回应、重复上限、预算、超时（注入失败）、协调器回到诊断、重启状态和恢复不重复请求。
+- TS/Vite构建通过，仅已有大bundle告警。浏览器第一次失败为定位器同时匹配段落和折叠JSON，改为exact定位；最后 **1 passed，2.9秒**。验证明确证据暂停分类、作者绑定/详情和HTML按文本展示，属于离线接口夹具，不算真实模型浏览器闭环。
+- 真实原案例隔离重放：617f098950114d989220dd2e456ce7b1。程序取回faulty/backend.py、faulty/app.py和public_target_ready_after_delay的实际记录，三项均available，未调用Docker、未修改原失败实例。仅一次真实诊断，deepseek-v4-flash，HTTP200/stop，输入29338、输出663、总30001 token；reasoning_tokens未知。
+- **真实诊断未通过**：模型遗漏evidence_responses，被服务端明确拒绝，未创建修复候选。人工检查还发现其方案恢复完整探测循环，会消除冻结故障，不能作为正确修复。拒绝的直接原因是缺少逐ID回应，不能声称程序已自动证明该修法语义矛盾。之后将错误消息细化为所需ID与已收到ID，未额外调用真实模型，也未把失败包装为成功。
+- 暂不支持模型自拟新输入或直接内部函数实验：自然语言input_domain不能仅凭结构schema可靠判定，首版固定case_id是兼容且保守的执行边界，需明确后续扩大范围时另行设计验证。代码分析结论、执行观察与客观判分始终区分。
+- 无活动任务后优雅重启后端，PID2941327监听8000；重启前后226条非task记录摘要核对，原失败记录未重写。记录存data/evidence-verification（不提交私人资产）。未重新生成/发布原题，未做完整真实训练闭环，未重跑全仓库或原18项Docker验收；本轮不宣称提高了总体生成成功率。
+
+## 2026-09-21 纠正无补充证据时的回应协议歧义
+
+责任与根因：实例d71103216fe04815900310a94dbcce21没有diagnostic_evidence，却收到无条件要求填写evidence_responses的说明。模型将当前matrix检查ID误填其中；服务端错误称其为“旧资产”，连续两次拒绝后停止。本次修复不自动丢弃错误引用、不放宽冻结故障/评分门禁、不增加模型预算。
+
+程序改动：统一response_contract生成精确allowed_ids及required；无补充记录时Schema允许省略/仅空对象（maxProperties=0），有记录时按真实ID生成required/properties/additionalProperties=false。服务端validate_responses独立强制校验。EvidenceResponseError结构化区分当前矩阵ID、过期补充ID、未知ID、遗漏ID和短说明，并指出矩阵引用只放evidence[].check_ids；完整反馈经持久化进入下一次诊断context。历史记录不迁移，原暂停任务未自动恢复。
+
+实际命令：
+```bash
+.venv/bin/python -m pytest tests/test_evidence_responses.py tests/test_generation_evidence.py tests/test_handoff.py tests/test_generation_flow.py -q --junitxml=data/evidence-response-verification/tests.xml
+set -a; source .env; set +a
+.venv/bin/python -c "import runpy; runpy.run_path('data/evidence-response-verification/probe.py',run_name='__main__')"
+.venv/bin/python -m compileall -q backend
+git diff --check
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+- 确定性及相关Docker回归 **39 passed、0 skipped，103.63秒**。验证省略/空对象、有补充时精确引用、当前检查非过期、未知/过期/缺少/短回应、结构化反馈实际进入下一次模型输入，并包含原证据/交接/协调器回归。已有Starlette弃用警告，compileall/diff通过。此次未改前端，未重跑前端构建/浏览器或全仓库测试。
+- 原两份失败工单只读重放：均准确识别两个误填当前矩阵检查ID，allowed_ids=[]、stale_ids=[]；明确要求省略或{}，不再含糊归因为旧资产。
+- 一次真实纠正联调，隔离实例8795ef4d5f334aa69c788c508b6c2c7c。deepseek-v4-flash，HTTP200/stop，输入22776、输出509、总23285 token，reasoning_tokens未提供。模型返回evidence_responses={}，通过工单结构/范围校验。**只证明此次字段协议已纠正**。
+- 人工质量检查：模型仍提出就绪后恢复注册并声称保留“不注册”故障，这在语义上仍有冲突风险。未调用构建修复、未运行新矩阵、未发布；不能声称原题已生成成功，也不能把结构校验当语义正确证明。模型仍可能误解ID，确定性校验和具体反馈用于识别/纠正，不承诺永不失败。
+- 原数据不变：无活动任务后重启后端至PID2965570，227条非task记录重启前后核对摘要；证据保存在忽略的data/evidence-response-verification，不提交密钥和私人资产。
+
+## 2026-09-21 仅调整故障注入目标措辞，待用户测试
+
+按用户要求先做简单修复。本次只替换generation_roles中的构建/诊断角色说明、程序工单目标、修改要求，以及generation_repair_scope/generation_diagnostics中的说明与反馈：normal/reference使公开行为契约全部成立；faulty“修正故障注入实现，让指定故障在约定场景下稳定复现，同时保持未受影响场景正常，不得消除指定故障”；规避版保留指定错误修法，让目标检查识别并保留部分正常行为。未改版本ID、执行门禁、权限、调度、预算或快照，不追加机制。
+
+命令：
+```bash
+.venv/bin/python -m compileall -q backend/generation_roles.py backend/generation_repair_scope.py backend/generation_diagnostics.py
+.venv/bin/python -m pytest tests/test_repair_scope.py tests/test_consolidated_roles.py -q --junitxml=data/wording-verification/final.xml
+git diff --check
+```
+首次5过1失败：已有测试直接匹配旧措辞“保留冻结主要故障”；仅将该断言更新为新“修正故障注入实现/不得消除指定故障”，原权限及隐藏信息隔离断言保留。最终 **6 passed、0 skipped，0.90秒**，compileall/diff通过，仅已有Starlette弃用警告。未进行真实模型生成、Docker行为矩阵或浏览器测试，不声称生成质量改善，等待用户试用决定下一步。确认无活动任务后重启后端至PID2980039，历史228条非task记录摘要核对；旧资产与记录未修改。
+
+## 2026-09-22 聚焦代码修改工单（不新增复核模型）
+
+按用户要求先用更具体的工单促进模型自查。edit_code改为逐条填写版本/业务文件/具体位置/当前行为/预期变化/必须保留的行为；取消新工单中的宽泛approach。程序强制字段、版本覆盖和文件权限，并拒绝当前/预期行为文本完全相同的无变化条目。提示说明填写时核对改变项与保留项是否兼容，若结论是分类问题应返回reclassify，不在代码动作中混写。未引入关键词路由、额外复核调用、AST无变化拦截或预算/门禁改动。旧资产和工单不重写，构建读取旧字段仍兼容；私有诊断描述不新增转发给构建。
+
+实际命令：
+```bash
+.venv/bin/python -m pytest tests/test_focused_work_order.py tests/test_handoff.py tests/test_generation_evidence.py tests/test_evidence_responses.py tests/test_consolidated_roles.py tests/test_repair_scope.py -q --junitxml=data/focused-order-verification/tests.xml
+.venv/bin/python -m compileall -q backend
+git diff --check
+curl -fsS http://127.0.0.1:8000/api/health
+```
+
+**28 passed、0 skipped，68.06秒**，包含相关Docker诊断/候选执行回归。验证必填字段、旧approach不再被新模型工单接受、版本覆盖/文件权限、明确行为变化、隐私上下文隔离、旧持久化工单读取兼容及既有证据/交接权限。compileall/diff通过，仅已有Starlette弃用警告。无前端修改，未重跑前端/全仓库或全部18项Docker验收。未进行真实模型生成或恢复旧任务，不声称已提高成功率；字段具体也不能保证模型自我检查或语义正确，等待用户实际测试。
+
+确认无活动任务后优雅重启至PID3012170，历史232条非task记录摘要核对，验证目录data/focused-order-verification。没有调用模型、改写旧实例或发布题目。

@@ -39,7 +39,7 @@ def test_builder_work_order_preserves_fault_without_hidden_assets(client):
     j['pending_plan']={'matrix_id':'latest','contract_hash':j['contract_hash'],'target_variants':['faulty'],'category':'implementation','contract_behavior_ids':['sum'],'change_request':'DO_NOT_FORWARD_PRIVATE_PROSE'}
     j['matrix']={'checks':[{'case':'empty','visibility':'hidden','version':'faulty','actual':'HIDDEN_OUTPUT_SENTINEL'}]}
     ctx=roles.context(j,'repair_build');order=ctx['work_order']
-    assert set(order['targets'])=={'faulty'} and '保留冻结主要故障' in order['targets']['faulty']
+    assert set(order['targets'])=={'faulty'} and '修正故障注入实现' in order['targets']['faulty'] and '不得消除指定故障' in order['targets']['faulty']
     assert order['matrix_id']=='latest'
     assert 'DO_NOT_FORWARD_PRIVATE_PROSE' not in json.dumps(ctx) and 'HIDDEN_OUTPUT_SENTINEL' not in json.dumps(ctx)
     for stage in ('project_build','repair_build'):

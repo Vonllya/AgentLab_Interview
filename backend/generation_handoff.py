@@ -5,6 +5,7 @@ import re
 from typing import Annotated, Literal
 from pydantic import Field
 from .generation_schema import Strict
+from .generation_evidence_schema import EvidenceRequest
 
 VERSION='repair-handoff-v1'
 def enabled(job):return job.get('handoff_version')==VERSION
@@ -19,11 +20,18 @@ class Resolution(Strict):
     disposition:Literal['different_conditions','classification_error','specification_conflict','insufficient_evidence']
     explanation:str=Field(min_length=15,max_length=1200)
 
+class CodeEdit(Strict):
+    variant:str=Field(description='必须属于action.variants的授权版本')
+    path:str=Field(description='契约内业务文件，不能填测试或私有资产路径')
+    location:str=Field(min_length=2,max_length=180,description='具体函数、类或代码段；定位属于分析推断')
+    current_behavior:str=Field(min_length=10,max_length=400,description='该位置目前产生的行为，区分代码推断与执行观察')
+    intended_behavior:str=Field(min_length=10,max_length=400,description='修改后应出现什么不同的行为；不得只写修复或通过测试')
+    must_preserve:str=Field(min_length=10,max_length=400,description='必须保留的行为及适用条件；faulty必须保留指定故障的触发条件和错误表现')
+
 class CodeAction(Strict):
     kind:Literal['edit_code']
     variants:list[str]=Field(min_length=1,max_length=6)
-    approach:str=Field(min_length=15,max_length=1400)
-    suspected_files:list[str]=Field(default_factory=list,max_length=5,description='诊断推断的相关模块，只能选契约文件；不是已证明故障位置')
+    edits:list[CodeEdit]=Field(min_length=1,max_length=8,description='逐个填写位置、当前行为、预期变化和保留项。若无法给出兼容的代码变化，应重新选择reclassify/review_spec/need_evidence，不在此填写相反调度指令。')
 
 class ClassificationChange(Strict):
     case_id:str
@@ -51,11 +59,13 @@ class EvidenceAction(Strict):
     kind:Literal['need_evidence']
     missing:str=Field(min_length=15,max_length=1200)
     proposed_verification:str=Field(min_length=15,max_length=1200)
+    requests:list[EvidenceRequest]=Field(min_length=1,max_length=3)
 
 class WorkOrder(Strict):
     action:Annotated[CodeAction|ClassificationAction|FingerprintAction|SpecAction|EvidenceAction,Field(discriminator='kind')]
     evidence:list[Evidence]=Field(min_length=1,max_length=6)
     resolutions:list[Resolution]=Field(default_factory=list,max_length=8)
+    evidence_responses:dict[str,str]=Field(default_factory=dict,max_length=20)
 
 class ConflictPair(Strict):
     left_ref:str
@@ -137,6 +147,12 @@ def record_conflict(job,kind,payload):
 def validate_order(job,raw):
     from . import generation as g, generation_diagnostics as d
     order=WorkOrder.model_validate(raw).model_dump();a=order['action'];kind=a['kind']
+    if kind=='need_evidence':
+        from pydantic import TypeAdapter
+        from .generation_evidence import EvidenceRequest
+        a['requests']=[TypeAdapter(EvidenceRequest).validate_python(r).model_dump() for r in a['requests']]
+    from .generation_evidence import validate_responses
+    validate_responses(job,order['evidence_responses'])
     checks={c['id']:c for c in job['matrix']['checks']};behaviors=job['contract']['behaviors']
     for e in order['evidence']:
         if not set(e['check_ids'])<=set(checks):raise ValueError('工单引用不属于当前矩阵')
@@ -155,8 +171,11 @@ def validate_order(job,raw):
           'hypothesis':'模型提案，待独立审核与实际验证。','change_request':'由结构化工单选择后续动作，不执行自由文字中的额外授权。',
           'evaluation_action':'none','target_cases':[],'requires_contract_confirmation':False}
     if kind=='edit_code':
-        if not set(a['suspected_files'])<=set(job['contract']['files']):raise ValueError('疑似模块必须是契约允许的文件')
-        plan.update(target_variants=a['variants'],change_request=a['approach'])
+        if len(set(a['variants']))!=len(a['variants']) or {x['variant'] for x in a['edits']}!=set(a['variants']):raise ValueError('代码变更条目必须恰好覆盖所选版本，不能遗漏或扩展版本')
+        for edit in a['edits']:
+            if edit['path'] not in job['contract']['files']:raise ValueError('修改位置必须是契约允许的业务文件')
+            if edit['current_behavior'].strip()==edit['intended_behavior'].strip():raise ValueError('当前行为与预期行为相同，未说明实际代码变化；请重新选择有依据的动作')
+        plan.update(target_variants=a['variants'],change_request='按结构化edits调整指定位置；逐项核对当前行为、预期变化及必须保留项，不以说明文字改派动作。')
     elif kind=='reclassify':
         cases={c['id']:c for c in g.asset(job,'evaluation')['cases']}
         if len({x['case_id'] for x in a['changes']})!=len(a['changes']):raise ValueError('检查重复')

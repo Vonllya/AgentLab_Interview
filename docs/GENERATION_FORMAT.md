@@ -96,3 +96,9 @@ POST `/api/generation/jobs/{id}/requirement-answer`：`expected_revision`、`que
 - `needs_manual_review`：非运行状态，界面说明停止原因；作者入口显示私有冲突和候选，公开任务与训练上下文不暴露它们。`evidence_request` 保存尚缺证据及建议验证。
 
 工单权限与语义校验各有边界：程序能阻止动作混写、过期引用、越权文件/版本及未验证候选发布，不能自动证明模型的因果解释。冲突能被正确路由、候选能实际通过本轮检查，也不代表整个训练题设计已经符合用户意图，发布仍需人工审核。
+
+need_evidence动作现在要求requests（1–3项），每项包含question及以下一种结构：file/variant/path、check/check_id、scenario/variant/case_id。额外命令、路径和输入字段由Strict模型拒绝。诊断补充仅支持已存在的独立评测输入，未知场景明确不支持。WorkOrder增加evidence_responses对象，键必须正好对应当前资产的补充记录ID，值为说明。diagnostic_evidence保存binding(matrix_id/contract_hash/build_hash/evaluation_hash)、请求、完整结果、状态及时间；新实验另存execution_id、snapshot、environment、duration、actual或error。已有矩阵仍是唯一评分依据，补充记录不产生通过门禁。完整材料只在作者接口及失败分析上下文返回。
+
+evidence_responses协议补充：无当前补充记录时省略或{}；有记录时键必须恰好为evidence_response_contract.allowed_ids。矩阵检查ID只属于evidence[].check_ids。动态输出Schema与服务端校验均使用相同response_contract；错误反馈分别列出误用矩阵ID、过期补充ID、未知ID、遗漏和说明过短项，不把所有引用错误称作旧资产。
+
+2026-09-22：新诊断的edit_code动作不再使用宽泛approach/suspected_files，改为variants与edits。每条edit必须有variant、path、location、current_behavior、intended_behavior、must_preserve；版本集合须恰好覆盖variants，path限契约业务文件，当前与预期行为文本不能完全相同。缺字段及旧动作字段按结构错误退回，不用关键词自动改派。旧持久化工单保留原样，构建上下文仍兼容读取旧suspected_files。完整诊断文字可能包含隐藏检查内容，不直接转发构建；构建仅接收推断文件集合、现有程序义务与授权目标。字段完整和文本不同不证明语义正确，仍需执行门禁。

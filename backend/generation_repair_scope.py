@@ -42,4 +42,4 @@ def repair_scope(job, evasion_names):
             'other_unmet_requirements':(['fingerprint_must_exclude_normal_and_reference'] if gates.get('fingerprint_discriminates') is False else []),
             'authority':'程序依据当前矩阵计算，模型不得重解释修改权限。允许修改不等于已确定根因；可依现有流程提出有依据的评测或规范问题，不能据此自动改期望。',
             'evasion_meaning':'目标检查失败且至少一个回归通过且无运行错误，表示错误修复已被正确识别，候选已合格、禁止再改；不表示该代码是正确修复。',
-            'faulty_meaning':'故障命中与回归通过是独立义务；故障命中不能豁免回归失败。修复回归必须保留已命中的冻结故障。'}
+            'faulty_meaning':'故障注入版本的目标：指定故障在约定场景下稳定复现，未受影响场景正常。故障命中与回归通过是独立义务，不能相互替代；调整故障注入实现时不得消除指定故障。'}
