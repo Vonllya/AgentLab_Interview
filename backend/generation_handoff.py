@@ -147,6 +147,8 @@ def record_conflict(job,kind,payload):
 def validate_order(job,raw):
     from . import generation as g, generation_diagnostics as d
     order=WorkOrder.model_validate(raw).model_dump();a=order['action'];kind=a['kind']
+    from . import generation_fault_model as fm
+    if fm.enabled(job):fm.validate_action(job,a)
     if kind=='need_evidence':
         from pydantic import TypeAdapter
         from .generation_evidence import EvidenceRequest
@@ -201,7 +203,14 @@ def builder_result(job,raw):
     from . import generation_diagnostics as d
     value=BuildDecision.model_validate(raw).model_dump()['result']
     if value['kind']=='modified':
-        try:return d.merge_repair(job,{k:value[k] for k in ('variants','explanations')})
+        try:
+            merged=d.merge_repair(job,{k:value[k] for k in ('variants','explanations')})
+            from . import generation_fault_model as fm, generation as g
+            if fm.enabled(job):
+                old=g.asset(job,'build');old_versions={**{k:old[k] for k in ('normal','reference','faulty')},**old['evasions']}
+                unchanged=[name for name,files in value['variants'].items() if fm.semantic_equal(old_versions[name],files)]
+                if unchanged:raise ValueError('AST未改变，仅注释或格式变化：'+','.join(unchanged))
+            return merged
         except ValueError as exc:
             if '未改变' not in str(exc):raise
             record_conflict(job,'unchanged_candidate',{'requirement_refs':list(obligations(job,job['pending_plan']['target_variants'])),
@@ -256,4 +265,8 @@ def record_validation(job):
     # Compare observed behavior, not source hashes, to avoid comment-only progress.
     observed=g.digest({'contract':job['contract_hash'],'checks':[{k:c.get(k) for k in ('case','version','group','status','actual','expected','fault_match')} for c in m['checks']]})
     repeats=sum(x['observed']==observed for x in seen);seen.append({'state':state,'observed':observed,'matrix_id':m['id']})
-    if not m['passed'] and repeats>=1:raise NeedsReview('候选执行仍得到相同失败结果，没有新的行为证据；停止自动重复，等待作者复核。')
+    from . import generation_fault_model as fm
+    if fm.enabled(job):
+        job['candidate_feedback']=fm.counterexamples(job)
+        g.put(job)
+    if not m['passed'] and repeats>=(2 if fm.enabled(job) else 1):raise NeedsReview('候选执行仍得到相同失败结果，没有新的行为证据；停止自动重复，等待作者复核。')

@@ -34,3 +34,27 @@ test('证据暂停分类和作者补充记录（离线夹具）',async({page})=>
  await expect(page.getByText('代码不是通过证明',{exact:true})).toBeVisible();await page.getByText('证据详情',{exact:true}).click();
  await expect(page.getByText('<script>alert(1)</script>',{exact:false})).toBeVisible();
 });
+
+test('执行前覆盖失败不会显示代码工单冲突（离线夹具）',async({page})=>{
+ const id='f'.repeat(32);
+ await page.route('**/api/generation/jobs/'+id,route=>route.fulfill({json:{id,request:{requirement:'覆盖补全边界展示'},status:'needs_manual_review',stage:'evaluation',checkpoint:'evaluation',mode:'mock',policy_version:'roles-v1',contract_version:0,budget:{policy:{requests:24},requests:3},request_count:3,attempts:[{role:'评测 Agent',status:'failed',failure_kind:'coverage_incomplete',attempt:1,coverage_completion:true}],error:{category:'coverage_incomplete',reason:'执行前覆盖补全已尝试两次仍未通过；未执行Docker。'}}}));
+ await page.goto('/generate/'+id);
+ await expect(page.locator('strong[role=status]')).toHaveText('执行前覆盖待复核');
+ await page.getByText('阶段执行记录（1）',{exact:true}).click();
+ await expect(page.getByText('评测 Agent · 执行前覆盖不足 · 调用 #1',{exact:false})).toBeVisible();
+ await expect(page.getByText('故障范围指导的覆盖补全（非盲测）',{exact:false})).toBeVisible();
+ await expect(page.getByText('交接冲突待人工复核',{exact:true})).toHaveCount(0);
+ await page.reload();await expect(page.locator('strong[role=status]')).toHaveText('执行前覆盖待复核');
+});
+
+test('规范局部补丁错误分类及刷新恢复（离线夹具）',async({page})=>{
+ const id='a'.repeat(32);
+ await page.route('**/api/generation/jobs/'+id,route=>route.fulfill({json:{id,request:{requirement:'规范补齐展示'},status:'needs_manual_review',stage:'project_build',checkpoint:'project_build',mode:'mock',policy_version:'roles-v1',contract_version:1,budget:{policy:{requests:24},requests:3},request_count:3,attempts:[{role:'构建 Agent',status:'failed',failure_kind:'spec_patch_invalid',attempt:1,specification_patch:true}],error:{category:'spec_patch_exhausted',reason:'规范补齐达到有界尝试上限，原资产不变'}}}));
+ await page.goto('/generate/'+id);
+ await expect(page.locator('strong[role=status]')).toHaveText('规范补齐待复核');
+ await page.getByText('阶段执行记录（1）',{exact:true}).click();
+ await expect(page.getByText('规范字段补丁不合格',{exact:false})).toBeVisible();
+ await expect(page.getByText('局部规范补丁（冻结资产由程序保留）',{exact:false})).toBeVisible();
+ await expect(page.getByText('执行前覆盖不足',{exact:false})).toHaveCount(0);
+ await page.reload();await expect(page.locator('strong[role=status]')).toHaveText('规范补齐待复核');
+});

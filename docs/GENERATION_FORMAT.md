@@ -102,3 +102,33 @@ need_evidence动作现在要求requests（1–3项），每项包含question及�
 evidence_responses协议补充：无当前补充记录时省略或{}；有记录时键必须恰好为evidence_response_contract.allowed_ids。矩阵检查ID只属于evidence[].check_ids。动态输出Schema与服务端校验均使用相同response_contract；错误反馈分别列出误用矩阵ID、过期补充ID、未知ID、遗漏和说明过短项，不把所有引用错误称作旧资产。
 
 2026-09-22：新诊断的edit_code动作不再使用宽泛approach/suspected_files，改为variants与edits。每条edit必须有variant、path、location、current_behavior、intended_behavior、must_preserve；版本集合须恰好覆盖variants，path限契约业务文件，当前与预期行为文本不能完全相同。缺字段及旧动作字段按结构错误退回，不用关键词自动改派。旧持久化工单保留原样，构建上下文仍兼容读取旧suspected_files。完整诊断文字可能包含隐藏检查内容，不直接转发构建；构建仅接收推断文件集合、现有程序义务与授权目标。字段完整和文本不同不证明语义正确，仍需执行门禁。
+
+## 可执行故障影响模型 v1
+
+新 API 记录 `fault_model_version: fault-model-v1`，构建 Bundle 增加私有 `fault_model`：
+
+```json
+{
+  "trigger": {"any_of": [[
+    {"path": ["ready_after"], "quantifier": "value", "operator": "gt", "value": 1}
+  ]]},
+  "affected_paths": [["attempts"], ["status"], ["registered_tools"]],
+  "preservation": "首次已就绪的输入保持完整正确行为；其他输出字段不受影响。"
+}
+```
+
+`path` 是字面 JSON 对象键/数组下标，空路径为根；不支持 shell、代码、通配表达式。`quantifier` 为 value/any/all，any/all 只作用于输入数组；operator 为 eq/ne/lt/le/gt/ge，顺序比较仅数字，不把 true 隐式当作 1。缺失路径、非法类型和超限规则报错，不默认为不触发。构建时检查路径属于公开 JSON 接口。输出影响可指定合法子树（如整个工具数组）。
+
+故障审核资产在原 `checks` 外增加 `review: agree|conflict`、`review_reason`、`impacts`。每个 impact 含 case_id、triggers、affected_paths、rationale，必须覆盖全部检查且不重复。独立审核冲突暂停作者复核。正文、规则及 impacts 都是作者资产，不进入学习者文件或训练 Agent；正常题库检查仅使用冻结正确行为期望。
+
+新矩阵增加 `fault_model_hash` 和 `fault_preserved_fields` 门禁。修复候选仍绑定原 build/evaluation/contract 摘要；分类修正不能改输入或期望。原协议不迁移。`tests/fixtures/fault_classification_regressions.json` 保存历史失败的最小分类投影，不是原项目完整执行证明；实际原记录继续保留在本地忽略的数据目录。
+
+### Amendment：冻结项目后的公开规范补齐
+
+仅用于同时具有 fault-model、installed_bundle、spec_review_feedback 的记录。模型返回：`contract_hash`、有效 Bundle 的 `bundle_hash`、`decision=patch|conflict`、`changes`、`conflict_evidence`、`explanation`。patch 最多8项，每项 path/before/after/reason，path 必须精确等于审查授权字段；不允许同时报告冲突。conflict 不得携带修改，必须引用至少两个不同 Bundle JSON 路径及连续原文。
+
+调用私有目录保存原 response、patch.json、合并后的 output.json 及输入/输出摘要。output.json 保持 Bundle 兼容性；项目取当前 build，不取旧初始代码。程序保留 private_fault_requirements/fault_model/project，模型不得重写它们。错误类别 spec_patch_invalid 附具体路径和当前期望；specification_conflict/spec_patch_exhausted 进入作者复核。此流程不新增学习者接口权限。
+
+### 构建请求 repair_handoff（输入字段，非响应协议变更）
+
+包含matrix/contract/build/evaluation/fingerprint摘要，edits（授权variant/path及代码中可核对symbols）、public_requirements（检查ID、公开input、objective、逐字段observed/required_value/matches）、omitted_public_checks及response_files。字段缺失与JSON null分开；故障断言和正确期望分开；规避检查不被要求修成正确实现。原私有工单留在作者审计，禁止整段转发隐藏诊断。构建响应仍必须返回完整版本文件集合。该输入随实际模型请求落盘，不是仅供UI展示的摘要。

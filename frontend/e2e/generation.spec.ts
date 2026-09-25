@@ -90,7 +90,7 @@ test('失败生成不可发布',async({page,request})=>{
  await expect(page.getByRole('alert')).toContainText('正常版本未通过');
  await page.getByText('阶段执行记录（3）',{exact:true}).click();
  await expect(page.getByText('独立评测 Agent · 修复补丁被拒绝 · 调用 #1',{exact:true})).toBeVisible();
- await expect(page.getByText('契约 Agent · 响应格式错误 · 调用 #2',{exact:true})).toBeVisible();
+ await expect(page.getByText('契约 Agent · 供应商响应格式不兼容 · 调用 #2',{exact:true})).toBeVisible();
  await expect(page.getByText('构建 Agent · 资产校验通过（非最终验收） · 调用 #1',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'审核通过并发布'})).toHaveCount(0);
  const denied=await request.post('/api/author/generation/'+created.id+'/publish',{data:{approved:true,note:'无执行证据不能发布，这个请求必须被拒绝',review_digest:'0'.repeat(64)}});

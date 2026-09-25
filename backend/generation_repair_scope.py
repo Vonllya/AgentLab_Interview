@@ -20,6 +20,7 @@ def repair_scope(job, evasion_names):
         elif name=='faulty':
             gate('fault_trigger','frozen_fault_reproduced_stably')
             gate('fault_regression','all_regression_checks_pass')
+            if 'fault_preserved_fields' in gates:gate('fault_preserved_fields','unaffected_output_fields_preserved')
         else:
             # An evasion is qualified when rejected on a target AND preserves a
             # regression. Target failure here is success for the task generator.

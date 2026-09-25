@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from . import generation as g, generation_budget as budget, generation_roles as roles, generation_diagnostics as diagnostics, contract_revision as contracts, agent, storage as s
 from . import generation_protocol as protocol, generation_direct as direct, generation_handoff as handoff, generation_format as fmt
 from .generation_evidence import EvidenceResponseError
+from . import generation_spec_patch as sp
 from .generation_schema import Contract,Project,validate_project,Teaching,Request
 
 STATES={'project_build':'building','spec_review':'reviewing_spec','design':'analyzing','build':'building','evaluation':'evaluating','fingerprint':'evaluating','diagnosis':'diagnosing','repair_build':'repairing_build','validation':'validating','teaching':'teaching','contract_review':'clarifying_contract','contract_check':'checking_contract','contract_apply':'checking_contract'}
@@ -34,13 +35,19 @@ def save_candidate(job,stage,output,directory):
 
 
 def call(job,stage):
-    check(job);messages=fmt.messages(job,stage,roles.messages(job,stage));encoded=json.dumps(messages,ensure_ascii=False)
+    check(job)
+    patching=stage=='project_build' and sp.enabled(job)
+    if patching:sp.reserve(job,consume=False)
+    messages=fmt.messages(job,stage,roles.messages(job,stage));encoded=json.dumps(messages,ensure_ascii=False)
     with s.LOCK:
         check(job);cap=budget.reserve(job,stage,len(encoded.encode()))
+        if patching:sp.reserve(job)
         directory=g.root(job)/('call-'+s.ident());directory.mkdir(parents=True)
         (directory/'input.json').write_text(encoded)
         audit={'stage':stage,**roles.identity(job,stage),'attempt':1+sum(a['stage']==stage for a in job['attempts']),'contract_version':job['contract_version'],'input_hash':g.digest(messages),'started':time.time(),'status':'running','reserved_tokens':cap,'asset':directory.name,'blind':stage=='evaluation' and not job.get('evaluation_review_guided',False)}
-        if stage=='project_build' and job.get('format_correction'):
+        if patching:audit['specification_patch']=True
+        if stage=='evaluation' and job.get('coverage_repair'):audit['coverage_completion']=True
+        if stage=='project_build' and not patching and job.get('format_correction'):
             audit['format_repair_of']=job['format_correction']['asset']
             audit['format_repair_attempt']=job['format_correction']['attempts']
         job['attempts'].append(audit);job['request_count']+=1;job.update(stage=stage,status=STATES[stage],active_action={'stage':stage,'asset':directory.name});g.put(job)
@@ -67,6 +74,9 @@ def call(job,stage):
             (directory/'response.txt').write_text(text);raw=json.loads(text)
         budget.settle(job,audit,meta);settled=True;check(job)
         parsed=roles.schema(job,stage).model_validate(raw).model_dump()
+        if patching:
+            (directory/'patch.json').write_text(json.dumps(parsed,ensure_ascii=False))
+            parsed=sp.merge(job,parsed)
         if stage=='project_build':parsed=direct.validate_bundle(job,parsed)
         if stage=='spec_review':parsed=direct.validate_review(job,parsed)
         if stage=='build':validate_project(Project.model_validate(parsed),Contract.model_validate(job['contract']))
@@ -99,7 +109,10 @@ def call(job,stage):
             if stage=='project_build':job['previous_bundle_assets']=copy.deepcopy(job['assets'])
             save_candidate(job,'build' if stage=='repair_build' else stage,parsed,directory)
         else:job.setdefault('diagnoses',[]).append(parsed)
-        if stage=='evaluation':job.pop('evaluation_candidate',None)
+        if stage=='evaluation':
+            job.pop('evaluation_candidate',None)
+            if job.get('coverage_repair'):
+                job.setdefault('coverage_repairs',[]).append({**job.pop('coverage_repair'),'status':'completed','output_hash':g.digest(parsed)})
         job.pop('active_action',None);job.pop('format_error',None)
         if stage=='project_build':job.pop('format_correction',None)
         g.put(job)
@@ -113,10 +126,14 @@ def call(job,stage):
         reason=({'category':'cancelled','reason':'调用被取消，响应不再推进资产'} if isinstance(exc,InterruptedError) else agent.model_error(exc) if isinstance(exc,agent.ModelFailure) else {'category':'asset_validation','reason':str(exc)[:1500]})
         if isinstance(exc,(direct.ReviewEvidenceError,EvidenceResponseError)):reason['validation_feedback']=exc.feedback
         if fmt.classify(exc):reason=fmt.classify(exc)
+        if getattr(exc,'category',None) in ('coverage_incomplete','spec_patch_invalid'):reason={'category':exc.category,'reason':str(exc),'validation_feedback':exc.feedback}
         audit['failure_kind']=(reason['category'] if isinstance(exc,agent.ModelFailure) else reason['category'] if isinstance(exc,(json.JSONDecodeError,ValidationError)) else 'diagnosis_rejected' if stage=='diagnosis' else 'patch_rejected' if job.get('evaluation_repair') or stage=='repair_build' else 'asset_invalid')
+        if getattr(exc,'category',None)=='specification_conflict':reason={'category':exc.category,'reason':str(exc)}
+        if reason['category'] in ('coverage_incomplete','spec_patch_invalid','specification_conflict'):audit['failure_kind']=reason['category']
         audit.update(status='outcome_unknown' if reason['category'] in ('timeout','cancelled') else 'failed',finished=time.time(),metadata=meta,error=reason)
         job.pop('active_action',None)
-        try:fmt.rejected(job,stage,exc,directory.name)
+        try:
+            if not patching:fmt.rejected(job,stage,exc,directory.name)
         finally:g.put(job)
         raise
 
@@ -125,6 +142,7 @@ def failure(job,stage,exc):
     reason=agent.model_error(exc) if isinstance(exc,agent.ModelFailure) else {'category':'validation' if stage=='validation' else 'asset_validation','reason':str(exc)[:1800]}
     if fmt.classify(exc):reason=fmt.classify(exc)
     if isinstance(exc,(direct.ReviewEvidenceError,EvidenceResponseError)):reason['validation_feedback']=exc.feedback
+    if getattr(exc,'category',None) in ('coverage_incomplete','spec_patch_invalid'):reason={'category':exc.category,'reason':str(exc),'validation_feedback':exc.feedback}
     item={'id':s.ident(),'stage':stage,'time':time.time(),'contract_version':job['contract_version'],'matrix_id':(job.get('matrix') or {}).get('id'),'error':reason}
     job.setdefault('failure_history',[]).append(item);job['error']=reason
     # Schema errors may echo private values: keep them only in that same role's context.
@@ -242,6 +260,10 @@ def run(id,start):
             except InterruptedError:raise
             except Exception as exc:
                 reason=failure(job,stage,exc)
+                # This is pre-execution coverage completion, not a failed code handoff.
+                if stage=='evaluation' and not job.get('matrix') and (reason['category']=='coverage_incomplete' or job.get('coverage_repair')) and not isinstance(exc,agent.ModelFailure):
+                    from .generation_coverage import begin_or_continue
+                    begin_or_continue(job,exc);continue
                 if handoff.enabled(job) and not isinstance(exc,agent.ModelFailure):handoff.rejection_guard(job,stage,exc)
                 if reason['category'] in ('authentication','permission','configuration'):
                     job['status']='waiting_provider';break
@@ -256,7 +278,7 @@ def run(id,start):
                 if stage=='validation':
                     if not g.executor.availability()[0]:job['status']='waiting_environment';break
                     stage='diagnosis'
-                elif stage=='evaluation' and direct.enabled(job) and not job.get('matrix') and reason['category']=='asset_validation' and len(job['attempts'])>=2 and all(a['stage']=='evaluation' and a['status']=='failed' and a.get('error',{}).get('category')=='asset_validation' for a in job['attempts'][-2:]):
+                elif stage=='evaluation' and direct.enabled(job) and not job.get('matrix') and reason['category'] in ('asset_validation','asset_constraint') and len(job['attempts'])>=2 and all(a['stage']=='evaluation' and a['status']=='failed' and a.get('error',{}).get('category') in ('asset_validation','asset_constraint') for a in job['attempts'][-2:]):
                     job['preflight_review']=True;stage='spec_review';g.put(job)
                 elif stage in ('repair_build','evaluation','fingerprint') and job.get('matrix') and len([f for f in job['failure_history'][-2:] if f['stage']==stage])==2:
                     stage='diagnosis'
@@ -290,6 +312,8 @@ def resume(id,note=''):
     elif direct.enabled(job) and stage=='spec_review' and job.get('attempts') and job['attempts'][-1]['stage']==stage and job['attempts'][-1]['status']=='completed':
         stage=direct.apply_review(job)
         if stage is None:return g.public(job)
+    elif job['status']=='needs_manual_review' and stage=='project_build' and sp.enabled(job):stage='project_build'
+    elif job['status']=='needs_manual_review' and not job.get('matrix') and stage=='evaluation':stage='evaluation'
     elif job['status'] in ('awaiting_contract_review','no_progress','needs_manual_review'):stage='diagnosis'
     elif stage=='design' and 'design' in job['assets']:
         design=g.asset(job,'design');job.update(contract=design['contract'],assessment=design['assessment'],rationale=design['rationale'],questions=design['questions'],private_fault_requirements=design['private_fault_requirements'],status='awaiting_contract',error=None)
@@ -342,6 +366,8 @@ def regenerate(id,body):
             child.pop(key,None)
         child.update(id=child_id,created=time.time(),parent_job=id,policy_version=budget.POLICY,batch_id=child_id,budget=budget.initialize(body.budget),status='interrupted',stage='design',attempts=[],request_count=0,validation_count=0,failure_history=[],diagnoses=[],asset_revisions=[],validation_history=[],revision=0,error=None,repair_note=body.repair_note,mode=agent.mode())
         for key in ('reliability_version','progress_history','stagnation_count','diagnostic_strategy','strategy_changed_at','regression_cases','diagnosis_rejections'):child.pop(key,None)
+        child.pop('spec_patch_attempts',None)
+        if child.get('coverage_repair'):child['coverage_repair']['attempts']=0
         child['inherited_failure']=source.get('error');child['inherited_matrix_id']=(source.get('matrix') or {}).get('id')
         # Copy immutable selected assets, never edit parent directories/records.
         import shutil

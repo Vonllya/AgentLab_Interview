@@ -1,0 +1,321 @@
+{
+  "source_job": "98ab434e09ea44e29dee402263eaa45c",
+  "contract": {
+    "title": "Agent启动时后端未就绪导致空工具注册",
+    "scenario": "模拟一个Agent启动流程：Agent启动时先向后端查询可用工具清单并注册，然后处理一次请求。后端有就绪延迟（ready_delay_ms），在延迟结束前查询工具清单会返回空列表。Agent按固定顺序执行：探测后端就绪、注册工具、处理请求。需要输出注册到的工具、请求处理结果、状态与诊断信息。",
+    "symptom": "当后端就绪延迟大于0时，Agent在就绪前完成工具注册，注册工具列表为空，随后处理请求时因无可用工具而返回未处理状态。",
+    "capabilities": [
+      "模拟后端就绪延迟与工具清单查询",
+      "模拟Agent启动时的工具注册流程",
+      "按固定顺序输出注册结果、请求结果、状态与诊断"
+    ],
+    "minutes": 15,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ready_delay_ms": {
+          "type": "integer",
+          "description": "后端就绪延迟毫秒数，0表示立即可用"
+        },
+        "request": {
+          "type": "string",
+          "description": "要处理的请求文本"
+        },
+        "wait_for_ready": {
+          "type": "boolean",
+          "description": "Agent是否在注册前等待后端就绪"
+        }
+      },
+      "required": [
+        "ready_delay_ms",
+        "request",
+        "wait_for_ready"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registered_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "request_status": {
+          "type": "string",
+          "enum": [
+            "handled",
+            "unhandled"
+          ]
+        },
+        "request_result": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "degraded"
+          ]
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "registered_tools",
+        "request_status",
+        "request_result",
+        "status",
+        "diagnostics"
+      ]
+    },
+    "behaviors": {
+      "tool_registration": "后端就绪后可用工具清单固定为 [\"search\",\"calc\",\"echo\"]，顺序固定。若注册时后端未就绪，registered_tools 为空列表 []。",
+      "readiness_probe": "后端就绪判定：ready_delay_ms <= 0 视为立即就绪；ready_delay_ms > 0 时，只有在 wait_for_ready 为 true 且模拟等待完成后才视为就绪。",
+      "request_handling": "若 registered_tools 非空，request_status 为 \"handled\"，request_result 为 \"handled:<request>\"；若为空，request_status 为 \"unhandled\"，request_result 为 \"no tools registered\"。",
+      "status_rule": "registered_tools 非空时 status 为 \"ok\"；为空时 status 为 \"degraded\"。",
+      "diagnostics_rule": "diagnostics 固定顺序：先输出 \"ready_delay_ms=<值>\"，再输出 \"wait_for_ready=<true|false>\"，最后输出 \"registered=<数量>\"。",
+      "determinism": "相同输入必须产生完全相同的输出，不依赖时间、随机数或外部状态。"
+    },
+    "constraints": [
+      "仅使用Python标准库",
+      "不访问网络或真实外部服务",
+      "输出必须为确定性值",
+      "registered_tools 顺序固定为 search,calc,echo",
+      "diagnostics 顺序固定"
+    ],
+    "input_domain": "ready_delay_ms 为整数，范围 0 到 10000；request 为长度 0 到 200 的字符串；wait_for_ready 为布尔值。",
+    "exclusions": [
+      "不模拟真实网络协议",
+      "不模拟并发或多Agent",
+      "不处理工具实际执行逻辑"
+    ],
+    "files": [
+      "app.py",
+      "backend.py",
+      "registry.py",
+      "agent.py"
+    ],
+    "simulation": "backend.py 提供 Backend 类，属性 ready_delay_ms，方法 is_ready(elapsed_ms) 返回 elapsed_ms >= ready_delay_ms，方法 list_tools() 在后端就绪时返回 [\"search\",\"calc\",\"echo\"]，否则返回 []。registry.py 提供 Registry 类，register(tools) 保存工具列表，tools 属性返回已注册列表。agent.py 提供 Agent 类，构造接收 backend、registry、wait_for_ready；start() 方法：若 wait_for_ready 为 true 则模拟等待 ready_delay_ms 后 elapsed=ready_delay_ms，否则 elapsed=0；调用 backend.is_ready(elapsed)，若就绪则 registry.register(backend.list_tools())，否则 registry.register([])。app.py 的 scenario(data) 读取 ready_delay_ms、request、wait_for_ready，构造 Backend、Registry、Agent，调用 start()，按契约计算 registered_tools、request_status、request_result、status、diagnostics 并返回 dict。"
+  },
+  "fault_model": {
+    "trigger": {
+      "any_of": [
+        [
+          {
+            "path": [
+              "ready_delay_ms"
+            ],
+            "quantifier": "value",
+            "operator": "gt",
+            "value": 0
+          },
+          {
+            "path": [
+              "wait_for_ready"
+            ],
+            "quantifier": "value",
+            "operator": "eq",
+            "value": true
+          }
+        ]
+      ]
+    },
+    "affected_paths": [
+      [
+        "registered_tools"
+      ],
+      [
+        "request_status"
+      ],
+      [
+        "request_result"
+      ],
+      [
+        "status"
+      ],
+      [
+        "diagnostics"
+      ]
+    ],
+    "preservation": "当 ready_delay_ms <= 0 或 wait_for_ready 为 false 时，输出必须与正确契约完全一致：ready_delay_ms <= 0 时注册到 [\"search\",\"calc\",\"echo\"]，request_status 为 handled，status 为 ok；wait_for_ready 为 false 且 ready_delay_ms > 0 时注册为空，request_status 为 unhandled，status 为 degraded。"
+  },
+  "evaluation": {
+    "cases": [
+      {
+        "id": "target-delay-no-wait",
+        "group": "target",
+        "visibility": "public",
+        "covers": [
+          "tool_registration",
+          "readiness_probe",
+          "request_handling",
+          "status_rule",
+          "diagnostics_rule"
+        ],
+        "input": {
+          "ready_delay_ms": 500,
+          "request": "hello",
+          "wait_for_ready": false
+        },
+        "expected": {
+          "registered_tools": [],
+          "request_status": "unhandled",
+          "request_result": "no tools registered",
+          "status": "degraded",
+          "diagnostics": [
+            "ready_delay_ms=500",
+            "wait_for_ready=false",
+            "registered=0"
+          ]
+        },
+        "faulty_expected": null,
+        "classification_reason": "主要故障场景：延迟大于0且不等待，注册时后端未就绪，注册为空，请求未处理，状态降级。针对主要故障。"
+      },
+      {
+        "id": "target-delay-wait",
+        "group": "target",
+        "visibility": "hidden",
+        "covers": [
+          "tool_registration",
+          "readiness_probe",
+          "request_handling",
+          "status_rule",
+          "diagnostics_rule"
+        ],
+        "input": {
+          "ready_delay_ms": 3000,
+          "request": "compute 1+1",
+          "wait_for_ready": true
+        },
+        "expected": {
+          "registered_tools": [
+            "search",
+            "calc",
+            "echo"
+          ],
+          "request_status": "handled",
+          "request_result": "handled:compute 1+1",
+          "status": "ok",
+          "diagnostics": [
+            "ready_delay_ms=3000",
+            "wait_for_ready=true",
+            "registered=3"
+          ]
+        },
+        "faulty_expected": null,
+        "classification_reason": "延迟大于0但等待就绪，注册非空，请求被处理，状态ok。针对主要故障的对照正确路径。"
+      },
+      {
+        "id": "regression-zero-delay",
+        "group": "regression",
+        "visibility": "public",
+        "covers": [
+          "tool_registration",
+          "readiness_probe",
+          "request_handling",
+          "status_rule",
+          "diagnostics_rule"
+        ],
+        "input": {
+          "ready_delay_ms": 0,
+          "request": "ping",
+          "wait_for_ready": false
+        },
+        "expected": {
+          "registered_tools": [
+            "search",
+            "calc",
+            "echo"
+          ],
+          "request_status": "handled",
+          "request_result": "handled:ping",
+          "status": "ok",
+          "diagnostics": [
+            "ready_delay_ms=0",
+            "wait_for_ready=false",
+            "registered=3"
+          ]
+        },
+        "faulty_expected": null,
+        "classification_reason": "延迟为0立即就绪，不触发主要故障，验证正常注册与处理路径。"
+      },
+      {
+        "id": "regression-empty-request",
+        "group": "regression",
+        "visibility": "hidden",
+        "covers": [
+          "request_handling",
+          "diagnostics_rule"
+        ],
+        "input": {
+          "ready_delay_ms": 0,
+          "request": "",
+          "wait_for_ready": true
+        },
+        "expected": {
+          "registered_tools": [
+            "search",
+            "calc",
+            "echo"
+          ],
+          "request_status": "handled",
+          "request_result": "handled:",
+          "status": "ok",
+          "diagnostics": [
+            "ready_delay_ms=0",
+            "wait_for_ready=true",
+            "registered=3"
+          ]
+        },
+        "faulty_expected": null,
+        "classification_reason": "空请求字符串边界，延迟为0不触发主要故障，验证请求结果拼接与诊断格式。"
+      },
+      {
+        "id": "regression-determinism",
+        "group": "regression",
+        "visibility": "public",
+        "covers": [
+          "determinism",
+          "tool_registration",
+          "diagnostics_rule"
+        ],
+        "input": {
+          "ready_delay_ms": 0,
+          "request": "repeat",
+          "wait_for_ready": true
+        },
+        "expected": {
+          "registered_tools": [
+            "search",
+            "calc",
+            "echo"
+          ],
+          "request_status": "handled",
+          "request_result": "handled:repeat",
+          "status": "ok",
+          "diagnostics": [
+            "ready_delay_ms=0",
+            "wait_for_ready=true",
+            "registered=3"
+          ]
+        },
+        "faulty_expected": null,
+        "classification_reason": "确定性检查：相同输入重复执行必须产生完全相同的输出，延迟为0不触发主要故障，验证无时间/随机依赖。"
+      }
+    ],
+    "evasion_checks": [
+      "检查 registered_tools 是否严格为 [\"search\",\"calc\",\"echo\"] 顺序，而非其他顺序或额外工具",
+      "检查 diagnostics 是否严格按 ready_delay_ms、wait_for_ready、registered 顺序且文本格式一致",
+      "检查 request_result 是否精确为 \"handled:<request>\" 或 \"no tools registered\"，无多余空格或前缀",
+      "检查输出为 dict 而非 JSON 字符串，且不包含未定义字段",
+      "检查相同输入重复执行输出完全一致，不依赖时间或随机数"
+    ]
+  }
+}

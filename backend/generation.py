@@ -65,7 +65,7 @@ def public(job):
         result['matrix']={**job['matrix'],'checks':[{k:c.get(k) for k in ('id','version','case','group','visibility','covers','snapshot','status','duration')} for c in job['matrix']['checks']]}
     if result.get('matrix'):
         result['matrix'].pop('evasion_witnesses',None);result['matrix'].pop('fault_checks',None)
-    result['attempts']=[{k:a.get(k) for k in ('stage','attempt','status','started','finished','input_hash','output_hash','error','blind','metadata','role','role_id','role_policy','reserved_tokens','charged_tokens','usage_unknown','failure_kind','outcome','format_repair_of','format_repair_attempt')} for a in job['attempts']]
+    result['attempts']=[{k:a.get(k) for k in ('stage','attempt','status','started','finished','input_hash','output_hash','error','blind','metadata','role','role_id','role_policy','reserved_tokens','charged_tokens','usage_unknown','failure_kind','outcome','format_repair_of','format_repair_attempt','coverage_completion','specification_patch')} for a in job['attempts']]
     if job.get('policy_version')=='roles-v1':
         for a in result['attempts']:
             if a.get('error'):a['error']={'category':a['error']['category'],'reason':'角色调用或资产校验失败，已记录并按预算处理'}
@@ -74,7 +74,7 @@ def public(job):
     return result
 
 
-def create(request,policy=True,direct_build=False,handoff=False):
+def create(request,policy=True,direct_build=False,handoff=False,fault_model=False):
     job={'id':s.ident(),'request':request.model_dump(),'created':time.time(),'mode':agent.mode(),'status':'draft','stage':'design','contract_version':0,'confirmed_version':None,'assets':{},'attempts':[],'request_count':0,'error':None,'matrix':None}
     if policy:
         from .generation_budget import initialize,POLICY
@@ -85,6 +85,10 @@ def create(request,policy=True,direct_build=False,handoff=False):
     if handoff:
         from .generation_handoff import VERSION
         job['handoff_version']=VERSION
+    if fault_model:
+        if not (policy and direct_build and handoff):raise ValueError('故障模型需要完整的有界直接构建流程')
+        from .generation_fault_model import VERSION
+        job['fault_model_version']=VERSION
     put(job)
     return job
 
@@ -252,6 +256,13 @@ def validate(job):
     faulty=[c for c in checks if c['version']=='faulty']
     gates={'normal':passed('normal'),'reference':passed('reference'),'fault_trigger':any(c.get('fault_match') and c.get('stable') for c in faulty),'fault_regression':all(c['status']=='passed' for c in faulty if c['group']=='regression'),
            'evasion_rejected':all(any(c['status']=='failed' and c['group']=='target' for c in checks if c['version']==name) and any(c['status']=='passed' and c['group']=='regression' for c in checks if c['version']==name) for name in project.evasions),'no_runtime_errors':not errors}
+    from . import generation_fault_model as fm
+    if fm.enabled(job):
+        model=fm.frozen(job)
+        for c in faulty:
+            c['unaffected_fields_preserved']=c['status']!='error' and fm.preserves_unaffected(c.get('actual'),c.get('expected'),model['affected_paths'] if c['group']=='target' else [])
+        gates['fault_preserved_fields']=all(c['unaffected_fields_preserved'] for c in faulty)
+        matrix['fault_model_hash']=digest(model)
     if faults:gates['fingerprint_discriminates']=not any(c.get('fault_match') for c in checks if c['version'] in ('normal','reference'))
     matrix.update(gates=gates,passed=all(gates.values()),finished=time.time(),duration=round(time.monotonic()-start,3))
     put(job)
@@ -375,7 +386,7 @@ def cancel(id):
 def review_assets(id):
     from .generation_reliability import author_summary
     job=get(id)
-    return {'diagnostic_evidence':job.get('diagnostic_evidence',[]),'evidence_request':job.get('evidence_request'),'handoff_conflicts':job.get('handoff_conflicts',[]),'candidate_history':job.get('candidate_history',[]),'candidate_assets':job.get('candidate_assets',{}),'handoff_rejections':job.get('handoff_rejections',[]),'summary':author_summary(job),'job':public(job),'contract_history':job.get('contract_history',[]),'contract_reviews':job.get('contract_reviews',[]),'review_digest':job.get('review_digest'),'diagnoses':job.get('diagnoses',[]),'failure_history':job.get('failure_history',[]),'asset_revisions':job.get('asset_revisions',[]),'validation_history':job.get('validation_history',[]),'contract_private_requirements':job.get('private_fault_requirements'),'matrix':job.get('matrix'),'assets':{name:asset(job,name) for name in job['assets']},'trust':'仅作者审核页面；不要将私有材料复制到训练 Agent。测试为模型提出的标准，仍需作者逐项审核。'}
+    return {'specification_conflict':job.get('spec_patch_conflict'),'spec_patch_attempts':job.get('spec_patch_attempts',{}),'diagnostic_evidence':job.get('diagnostic_evidence',[]),'evidence_request':job.get('evidence_request'),'handoff_conflicts':job.get('handoff_conflicts',[]),'candidate_history':job.get('candidate_history',[]),'candidate_assets':job.get('candidate_assets',{}),'handoff_rejections':job.get('handoff_rejections',[]),'summary':author_summary(job),'job':public(job),'contract_history':job.get('contract_history',[]),'contract_reviews':job.get('contract_reviews',[]),'review_digest':job.get('review_digest'),'diagnoses':job.get('diagnoses',[]),'failure_history':job.get('failure_history',[]),'asset_revisions':job.get('asset_revisions',[]),'validation_history':job.get('validation_history',[]),'contract_private_requirements':job.get('private_fault_requirements'),'matrix':job.get('matrix'),'assets':{name:asset(job,name) for name in job['assets']},'trust':'仅作者审核页面；不要将私有材料复制到训练 Agent。测试为模型提出的标准，仍需作者逐项审核。'}
 
 
 def publish(id,approved,note,review_digest):

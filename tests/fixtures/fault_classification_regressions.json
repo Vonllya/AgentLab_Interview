@@ -1,0 +1,10 @@
+{
+  "provenance": "Minimal projections of author-side historical failures; not original complete jobs or proof of code behavior.",
+  "trigger": {"any_of": [[{"path": ["ready_after"], "quantifier": "value", "operator": "gt", "value": 1}]]},
+  "cases": [
+    {"source_job": "96758af39a464054a48aa0426aff1831", "case": "public_empty_tools_success", "input": {"ready_after": 2, "tools": []}, "old_group": "regression", "required_group": "target"},
+    {"source_job": "96758af39a464054a48aa0426aff1831", "case": "hidden_tools_order_preserved", "input": {"ready_after": 2, "tools": ["z", "a", "m", "b"]}, "old_group": "regression", "required_group": "target"},
+    {"source_job": "79d21c029f5341cd8e15871542bfa0ec", "case": "hidden-tool-order-preserved", "input": {"ready_after": 2, "tools": ["zeta", "alpha", "mid", "beta"]}, "old_group": "regression", "required_group": "target"},
+    {"source_job": "79d21c029f5341cd8e15871542bfa0ec", "case": "public-ready-first-attempt", "input": {"ready_after": 1}, "old_group": "target", "required_group": "regression"}
+  ]
+}

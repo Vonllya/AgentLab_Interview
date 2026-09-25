@@ -1236,3 +1236,112 @@ curl -fsS http://127.0.0.1:8000/api/health
 **28 passed、0 skipped，68.06秒**，包含相关Docker诊断/候选执行回归。验证必填字段、旧approach不再被新模型工单接受、版本覆盖/文件权限、明确行为变化、隐私上下文隔离、旧持久化工单读取兼容及既有证据/交接权限。compileall/diff通过，仅已有Starlette弃用警告。无前端修改，未重跑前端/全仓库或全部18项Docker验收。未进行真实模型生成或恢复旧任务，不声称已提高成功率；字段具体也不能保证模型自我检查或语义正确，等待用户实际测试。
 
 确认无活动任务后优雅重启至PID3012170，历史232条非task记录摘要核对，验证目录data/focused-order-verification。没有调用模型、改写旧实例或发布题目。
+
+## 2026-09-22 冻结故障影响与程序修复事项
+
+用户要求先保存当前版本，再修复且不提交新改动。修改前检查点 `6348617`（`Checkpoint focused work orders and bounded evidence recovery`）已推送 origin/main。以下修复保留未提交状态，未发布任何真实生成实例。
+
+根因：独立评测看不到私有故障设计，却被要求最终决定 target/regression；程序又把该未经核对的分类直接变成代码义务。历史“空工具”“保持顺序”检查虽主题正常，ready_after=2 仍命中冻结的单次探测故障，导致保留故障与通过回归相冲突。另有注释候选消耗执行、第一轮无效执行立即停止的问题。
+
+修复：新建任务冻结有界输入触发规则及输出影响范围；程序只计算分类，不改变正确期望；原指纹阶段独立核对每个检查的影响映射，支持明确拒绝。增加未受影响字段保留门禁；程序授权修复事项，禁止越权动作；AST不变候选执行前退回；首次实际无效候选提供精确状态/义务反馈再允许一次纠正，重复无效仍受停止及总预算限制。旧资产不迁移，不更改 Docker 边界。
+
+实际命令与中间结果：
+
+- `.venv/bin/python -m pytest tests/test_fault_model.py tests/test_handoff.py tests/test_focused_work_order.py tests/test_generation_direct.py -q`：初轮 **31 passed，0 skipped**，包括新模型 MOCK Docker 矩阵（20检查，每项2次）。后续仍增加了规则校验及回归，不能仅以此轮认定最终版本通过。
+- `.venv/bin/python -m pytest tests -q -o junit_family=xunit1 --junitxml=data/fault-model-verification/pytest.xml`：初轮 **237 passed，1 failed，0 skipped**。失败是旧测试要求错误文本包含“预期故障”，而检查点代码已经改成“故障注入版本…”；实际保护生效。改为断言禁止修改 `faulty`，未放松程序逻辑。
+- `npm --prefix frontend run build`：TypeScript/Vite通过；保留已有大包体提示。
+- 隔离浏览器初轮：**5 passed，9 failed**。15173 测试端口被生产同源校验拒绝，且部分测试夹具固定读写 `/tmp/agentlab-playwright`。修正的仅是忽略目录内临时测试配置：隔离代理转发合法本地Origin，测试后端统一使用既有测试夹具目录；不改生产同源白名单或用户数据。
+
+真实模型联调（两次都用现有配置，未打印密钥；在 `data/fault-model-verification/real-isolated` 保存，不发布）：
+
+1. `AGENTLAB_REAL_SMOKE=1 .venv/bin/python -m scripts.fault_model_probe`，实例 `28d4942688c942949691dfd03cc4f6f9`：**失败**，8次请求，均在构建阶段，未执行Docker。新协议初稿要求重复逐字引用自己的故障描述、且错误拒绝合法数组子树路径，造成额外失败；另有模型生成正常/故障相同和JSON语法错误。已删除重复描述字段（沿用唯一私有描述），修正子树路径验证；没有放宽故障不等于正常等门禁。原失败记录保留。
+2. 同命令，实例 `43d954fcdb9d4890964a97a7be8da666`：**自动验证通过，等待作者审核，未发布**。deepseek-v4-flash，8次请求，usage报告输出共7443 tokens，两轮矩阵，约150秒。独立评测首次漏覆盖determinism被拒，补齐后继续。首轮 normal/reference/fault_trigger/fault_regression/no_runtime_errors/fault_preserved_fields/fingerprint_discriminates 通过，evasion_rejected失败；程序仅授权两个规避版本，真实诊断与构建修改后第二轮8项门禁全部通过。最终矩阵 `7c71cede91bd4e818c201f79f6ff82b7`，30检查、每项两次独立Docker执行，无运行错误。两轮合计120次scenario执行。需求为“Agent启动时后端未就绪，导致空工具注册”；本轮构建采用 backend_ready 布尔模拟，不是历史 ready_after 项目的原输入重放。不能称原失败项目已经修复成功，也不据单次成功声称稳定生成率。
+
+人工查看了该真实批次的阶段资产、冻结条件、首末矩阵和授权工单：最终通过来自实际Docker比较；代码修复未修改独立输入/期望及已合格版本。本次仅工程复核，不替代用户发布审核。历史分类语料只验证规则解释器能拦截相同错误类别，不冒充历史完整项目Docker重跑。
+
+最终回归结果见下方补记。限制：规则仍由模型提出，语义准确性需独立及人工审核；受限规则不覆盖任意跨字段/跨时序关系；AST检查只识别语法树不变，不能证明任意代码行为等价；真实联调未验证全部领域或旧失败实例原样恢复。
+
+最终结果补记：
+
+- `.venv/bin/python -m pytest tests -q -o junit_family=xunit1 --junitxml=data/fault-model-verification/pytest-final.xml`：**241 passed，0 failed，0 skipped**（555.43秒）。
+- `.venv/bin/python scripts/verify_acceptance.py pytest data/fault-model-verification/pytest-final.xml`：明确核对原18项Docker测试及进阶8项全部执行通过，生成发布训练、角色修复、协议及契约修订Docker回归通过，missing_or_not_passed为空；不是仅凭pytest退出码。
+- 最后为旧 MOCK 新批次补齐 WorkOrder/BuildDecision 返回格式后，再执行 `.venv/bin/python -m pytest tests/test_fault_model.py tests/test_handoff.py tests/test_generation_flow.py tests/test_focused_work_order.py -q -o junit_family=xunit1 --junitxml=data/fault-model-verification/final-focused.xml`：**41 passed，0 skipped**（137.82秒）。真实适配器没有固定回复改动。
+- `npm --prefix frontend run test:e2e -- --config=node_modules/.cache/fault-model-playwright.mjs --reporter=list`：修正隔离环境后 **12 passed，2 failed**。两处失败分别是旧错误文案断言、旧MOCK返回旧修复协议。修复后以相同命令追加 `--grep '失败生成不可发布|自动诊断修复'`：**2 passed**（42.2秒）。合并覆盖14项全部通过、无跳过；不声称最后一次单独执行了14项。新流程的生成、MOCK审核发布、真实Docker训练、报告刷新闭环在上述12项中已通过。配置只在忽略的缓存目录，使用18010/15173端口；合法Origin只由隔离测试代理转发，生产安全中间件未改。
+- `npm --prefix frontend run build`：通过。`git diff --check`：通过。
+- 重启前确认生产数据没有执行中生成、运行或模型报告；保存234条非task记录摘要。后端已用原本地配置重启，`curl --fail --silent http://127.0.0.1:8000/api/health` 返回 real、docker_available=true。重启后仍为234条，全部摘要一致，未重写历史生成、会话或报告。
+- 最终 HEAD 与 origin/main 均为 `6348617`，暂存区为空；修复及文档均未提交、未推送。真实联调实例留在隔离数据目录等待审核，没有进入生产题库。
+
+## 2026-09-22 补全执行前覆盖反馈和调度遗漏
+
+针对原实例 `98ab434e09ea44e29dee402263eaa45c`：校验已按冻结规则分类，但退回摘要仍按模型原始分组计算，产生“缺少公开目标”和“缺项为空”的矛盾。asset_constraint分类还遗漏在旧重审条件之外，重复保护最终误报handoff_conflict。
+
+本次修改：单一覆盖事实函数、类型化coverage_incomplete、最多两次故障范围指导的追加检查（非盲测）、不可变原期望/输入检查、执行前恢复不进代码诊断、新批次计数及新规范清理、前端区分覆盖待复核和代码交接冲突，调用记录明确非盲测。没有放松发布或Docker门禁；未提交、未推送。
+
+验证与中间问题：
+
+- 使用原失败的最后一份评测、原契约和冻结规则建立 `tests/fixtures/coverage_failure_98ab.json`；它是作者侧回归资产，不进入学习者上下文。原线上记录未修改。
+- 首轮37项相关测试：36通过、1失败；失败为新测试直接调用内部协调器未获取执行槽。已修正测试；生产槽管理未改。
+- 下一轮39项相关回归：38通过、1失败；新恢复测试遗漏原流程要求的作者说明。补上说明，没有删除原恢复限制。
+- `.venv/bin/python -m pytest tests/test_generation_coverage.py tests/test_fault_model.py -q -o junit_family=xunit1 --junitxml=data/coverage-verification/final-focused.xml`：15通过、0跳过。涵盖真实失败资产、准确反馈、隔离上下文、原期望不可变、两次上限、持久化恢复及Docker模型矩阵。其他38项通过结果保留在regression.xml，不把该次有失败的整轮说成全通过。
+- 真实命令：`AGENTLAB_REAL_SMOKE=1 .venv/bin/python -m scripts.coverage_replay_probe`（由现有环境配置提供凭据，未输出密钥）。隔离实例 `9ec4fb2084174feead1d882617583819`，复制原构建/规范/评测资产，不重新出题，不修改源记录。
+- 真实覆盖补全第一次调用即通过，追加公开输入 ready_delay_ms=1、wait_for_ready=true、request=status；原5项检查输入/期望未变。调用审计blind=false。随后指纹审核通过，实际执行矩阵 `581f1bd07a884d40ae0b8d635ff99516` 共30检查、每项两次Docker执行。
+- **整个真实实例仍失败**：normal/reference/fault_trigger/fault_regression/no_runtime_errors/fault_preserved_fields/fingerprint_discriminates通过，evasion_rejected失败。之后两次构建返回无有效代码变化，触发unchanged_candidate停止；不是覆盖错误再次发生。共6次真实模型调用，没有发布。脚本首轮结束时因直接调用内部run导致执行槽重复释放异常，业务状态/矩阵此前已持久化；已将脚本改用正式launch入口，并从数据库另存结果，没有为重跑脚本而重复收费调用。
+- 浏览器隔离回归首次2通过、1失败：生成审核发布训练（MOCK、实际Docker）及原工单展示通过；新覆盖展示夹具缺少budget字段导致不显示阶段记录。补齐夹具后单独重跑，并验证非盲测标识。生产界面没有为测试放宽校验。
+
+限制：本次证实原覆盖阻塞被解除，不声称原项目所有门禁已通过。后续规避候选无有效修改属于另外的失败，原证据保留。未重新运行全部后端和全部领域真实生成验收，不沿用上一轮241项作为本次全量结果。
+
+最终补记：最新覆盖专测4项全部通过；新增覆盖展示浏览器测试重跑1项通过（连同前述生成闭环和原工单展示共覆盖3项通过，无跳过）；TypeScript/Vite构建与git diff --check通过。后端已重启加载修复，健康接口real、Docker可用；重启前后236条非task记录摘要完全一致。没有提交、推送或发布。
+
+## 2026-09-23 规范补齐遗漏修复
+
+根因：原失败实例 `90a606ae6bc14db5afec84166838d42a` 的构建输入缺少必须逐字冻结的 private_fault_requirements，却要求重新生成整包后原值相等。24次调用中，2次初始阶段成功、15次冻结资产拒绝、6次JSON语法失败、1次不支持的schema错误；其中13次冻结拒绝仅改变私有文字。project_build也未受旧重复拒绝保护覆盖。这是此前改动引入的输入/校验不配套及调度遗漏，不能归咎于模型随机性。
+
+本轮修复：
+
+- 引入 Amendment 局部补丁，不再重写冻结整包。服务器精确校验授权路径、before、摘要、重复及无变化，再复制当前项目和冻结描述；后续依然独立审查和重新验证。
+- 输入提供原需求/用户澄清、作者依据、当前规范、原私有文本和当前全部实现；剩余完整Bundle兼容分支也补齐冻结私有原文。未增加独立测试阶段的实现上下文。
+- 每次审查首次加2次纠正，每批补齐最多6次；持久化上限且受总预算约束。预算拒绝不扣补丁次数；旧整包格式修复不混入新协议。
+- 修复当前build被初始Bundle覆盖风险、完成调用恢复重复付费风险、补齐暂停误进diagnosis风险；新批次只重置子记录计数。
+- 冲突必须引用真实字段原文并保持资产不变，显示规范待复核。检查中另修正spec_patch_invalid被错误标成coverage_incomplete的审计遗漏；界面区分局部补丁错误和冻结规范冲突。
+
+验证：
+
+- `.venv/bin/python -m pytest tests/test_spec_patch.py tests/test_generation_direct.py tests/test_generation_format.py tests/test_generation_coverage.py -q`：37 passed、0 skipped（50.61秒）。
+- 新增分类、新批次和需求传递专测后：`.venv/bin/python -m pytest tests/test_spec_patch.py -q --junitxml=data/spec-patch-verification/focused-final.xml`：18 passed、0 skipped（8.89秒）。后续完整Bundle分支新增专测结果另补记。
+- 真实重放命令：`AGENTLAB_REAL_SMOKE=1 .venv/bin/python -m scripts.spec_patch_probe`，使用现有配置，不打印密钥；源原失败资产复制到隔离目录，源记录不变、不发布。实例 `628e9cfe166e4d96a2bcb14d9fac9241`，两次实际deepseek-v4-flash调用：局部补齐、独立规范校核均成功。补丁仅修改register_tools/wait_and_retry两个授权公开字段；代码、结构化故障规则及私有原文均逐项不变。契约版本2，校核approve，停在evaluation检查点，状态interrupted是脚本有意结束，不是声称整题通过。
+- 两次模型usage分别prompt/completion=4366/803、2765/925，finish_reason均stop，正文非空且parsed。原响应、补丁和摘要保存在隔离审计目录。人工核对补丁内容为计数文本格式、空列表和立即/等待就绪分支的明确化；独立审核没有看到实现。其后补充原需求/作者依据输入的保护由确定性测试验证，未再次付费重放。
+- `npm --prefix frontend run build`：TypeScript/Vite通过；保留既有大bundle警告，没有为此无关重构。
+
+限制：原资产中的私有描述status=degraded与故障代码强置ready造成status=ok的矛盾仍原样保留；本次修复规范补齐机制，没有擅自选择一方重写。真实重放未执行下游评测/Docker矩阵，不能称原题全部生成成功。原文引用校验不证明模型语义判断正确；此前规避版本与主故障target绑定的问题也未在本轮扩大修复。所有修复保持未提交、未推送。完整回归结果见最终补记。
+
+浏览器补记：`npm --prefix frontend run test:e2e -- --config=node_modules/.cache/fault-model-playwright.mjs --reporter=list`：**16 passed，0 skipped**（3.8分钟）。独立18010/15173测试服务；包含新增规范补丁分类/刷新、既有导航与草稿、MOCK生成审核发布和真实Docker训练提交、进阶多文件、模型反馈状态及安全Markdown。MOCK生成不计为真实模型成功。
+
+最终分支检查补记：`.venv/bin/python -m pytest tests/test_spec_patch.py tests/test_generation_direct.py tests/test_generation_format.py tests/test_generation_coverage.py -q --junitxml=data/spec-patch-verification/focused-complete.xml`：**42 passed，0 skipped**（68.39秒），包含最后补充的完整Bundle冻结原文分支。后端已确认无执行中生成/运行/反馈后安全重启；`curl --fail --silent http://127.0.0.1:8000/api/health` 返回agent_mode=real、docker_available=true。237条非task记录重启前后摘要完全相同。HEAD与origin/main仍是6348617，暂存区为空。
+
+全量结果：`.venv/bin/python -m pytest tests -q -o junit_family=xunit1 --junitxml=data/spec-patch-verification/pytest-final.xml`：**261 passed，0 failed，0 skipped**（601.39秒）。全量收集开始后追加的需求/新批次/兼容输入测试以及最后输入补全，由上述最终42项集中回归覆盖；不声称全量261项包含后来新增的全部测试。现有Starlette/anyio弃用警告与Vite体积警告保留。
+
+执行证据核对：`.venv/bin/python scripts/verify_acceptance.py pytest data/spec-patch-verification/pytest-final.xml` 返回passed=true，原18项Docker验收全部实际通过、进阶8项全部实际通过，生成发布训练/自动修复/契约修订/协议及直接构建Docker回归通过；missing_or_not_passed及nonpassing均为空。最终git diff --check通过，未提交或推送修复。
+
+## 2026-09-23 最小修复构建工单与执行差异传递
+
+原失败实例1df4672d36704837baf7a58db35ccafb：实际repair_build请求只保留诊断文件名与通用目标，未传逐字段故障差异。原工单自由文字可能包含隐藏证据，不能简单整段透传。本轮只新增generation_delivery编译器并接入构建请求：授权文件/可核对代码名称、公开检查ID与输入、实际值/要求值/是否匹配、明确故障目标与正确行为目标、缺失断言及截断标识、完整返回文件集合。冻结目标不改、隐藏信息不传、预算/执行器/发布门禁不变。没有宣称实现任意自然语言矛盾检测。
+
+按源资产建立作者侧回归fixture，直接断言roles.messages及flow.call最终送到completion适配器的消息；同时核对落盘input.json与实际请求一致。第一次新增适配器测试因对已解析列表重复json.loads而失败，修正测试读取方式后通过，不改变生产序列化。
+
+实际命令及结果：
+
+- `.venv/bin/python -m pytest tests/test_generation_delivery.py tests/test_focused_work_order.py tests/test_handoff.py tests/test_fault_model.py tests/test_generation_flow.py -q --junitxml=data/delivery-verification/regression.xml`：46 passed，0 skipped（143.75秒）。
+- `.venv/bin/python -m pytest tests/test_generation_delivery.py tests/test_focused_work_order.py tests/test_execution_diagnostics.py -q --junitxml=data/delivery-verification/final-focused.xml`：最终23 passed，0 skipped（9.66秒），含真实原输入、最终请求投递、隐私、过期绑定及执行错误反馈。
+- 真实联调命令两次：`AGENTLAB_REAL_SMOKE=1 .venv/bin/python -m scripts.delivery_replay_probe`，每次最多一次模型请求和一次矩阵，配置仅通过现有环境加载，不输出密钥；隔离数据，不修改原失败实例、不发布。
+- 第一次实例86d17f6c8ee84cf0ac12cebab27be4b7：deepseek-v4-flash返回HTTP200/stop，输入8113、输出518 token；模型已收到具体字段差异，但输出方向仍错且只返回agent.py，完整文件集合校验拒绝，没有新Docker矩阵。保留失败，不计成功。
+- 因首次反馈暴露竞争信息，去掉faulty目标场景旧public_observations中的正确expected（正确契约仍保留），以repair_handoff明确故障要求；显式列出完整版本文件集合，不改响应协议、不自动补文件掩盖供应商错误。
+
+- 第二次实例bc9f78cc8caa48a79eef349b8a5bd433：HTTP200/stop，输入8078、输出967 token，返回完整版本并进入真实Docker。矩阵9487528070b344ac99cdd0a29bb58b49，30项检查每项重复2次，无运行错误；normal/reference/fault_regression/evasion_rejected/fault_preserved_fields/fingerprint_discriminates均通过，fault_trigger失败。模型虽然收到diagnostics要求[]的具体交接，仍返回[backend_not_ready,startup_timeout]，还引入等待分支。故不能宣称真实模型修复成功。本轮共2次请求，未继续为追求成功追加调用。
+
+这两次实际请求及回归证明公开目标和定位确实到达构建适配器；不能据此声称模型必然采用或方案语义正确。后续自然语言矛盾校验、指纹设计合理性和更大范围调度不在本轮最小修复内。确定性Docker验证候选只用于验证差异是否可执行，不冒充真实生成或学习效果。
+
+确定性Docker专项中间失败：首轮7通过、1失败，行为门禁实际通过，但测试夹具遗漏project_flow标识导致未执行所有检查的第二次运行，repeat_count断言失败；补回源协议标识后，第二轮因夹具未初始化roles-v1预算在执行前KeyError，仍为7通过、1失败。补上隔离预算初始化，生产门禁、重复执行和预算规则未修改。最终重跑结果另补记。
+
+服务状态：确认无执行中生产任务后重启现有8000后端；健康接口返回real、docker_available=true。242条非task记录重启前后摘要完全相同。未提交、未推送、未发布。前端和执行器未改；本轮未重跑全量后端、全量浏览器和原18项Docker验收，不沿用上一轮全量通过结论。
+
+最终专项：`.venv/bin/python -m pytest tests/test_generation_delivery.py -q --junitxml=data/delivery-verification/actionable-complete.xml`：**8 passed，0 skipped**（49.49秒）。原始资产仅在测试候选中把反馈所指diagnostics两项数组改为[]，保持其余代码和独立检查不变；30项检查全部完成双次Docker执行，全部8个门禁通过。此结果证明已传递差异可用于有效修改，是确定性工程验证，不是模型修复成功。两次真实模型失败仍原样记录。最终git diff --check通过。

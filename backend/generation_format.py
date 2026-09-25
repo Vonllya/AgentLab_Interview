@@ -18,6 +18,8 @@ def classify(exc):
 
 
 def messages(job,stage,original):
+    from .generation_spec_patch import enabled
+    if stage=='project_build' and enabled(job):return original
     correction=job.get('format_correction')
     if stage!='project_build' or not correction or correction['contract_version']!=job['contract_version']:return original
     from . import generation as g

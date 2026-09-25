@@ -10,6 +10,8 @@ from .generation_schema import Strict,Design,Project,Evaluation,Teaching
 from .contract_revision import Proposal,Check
 from . import generation_protocol as protocol
 from . import generation_direct as direct
+from . import generation_fault_model as fm
+from . import generation_spec_patch as sp
 
 class RepairPlan(Strict):
     category:Literal['implementation','evaluation','evasion','contract','environment','unknown']
@@ -52,20 +54,33 @@ def identity(job,stage):
 def schema(job,stage):
     if handoff.enabled(job) and stage=='diagnosis':return handoff.WorkOrder
     if handoff.enabled(job) and stage=='repair_build':return handoff.BuildDecision
-    if stage=='project_build':return direct.Bundle
+    if stage=='project_build' and sp.enabled(job):return sp.Amendment
+    if stage=='project_build':return direct.ModeledBundle if fm.enabled(job) else direct.Bundle
     if stage=='spec_review':return direct.SpecReview
     if stage=='evaluation' and direct.enabled(job) and job.get('evaluation_repair'):return direct.EvaluationDecision
-    if stage=='fingerprint':return protocol.FaultChecks
+    if stage=='fingerprint':return protocol.ImpactFaultChecks if fm.enabled(job) else protocol.FaultChecks
+    if stage=='evaluation' and fm.enabled(job) and not job.get('evaluation_repair'):return protocol.IndependentBehaviorEvaluation
     if stage=='evaluation' and protocol.enabled(job):
         return protocol.EvaluationPatch if job.get('evaluation_repair') else protocol.BehaviorEvaluation
     return SCHEMAS[stage]
 
 def context(job,stage):
     from . import generation as g
+    if stage=='project_build' and sp.enabled(job):
+        base=sp.basis(job)
+        if job.get('format_error',{}).get('stage')==stage:
+            base['schema_error']=job['format_error']['reason']
+            base['validation_feedback']=job['format_error'].get('validation_feedback')
+        return base
     if stage in ('project_build','spec_review'):
         base={'requirement':job['request'],'requirement_answers':job.get('requirement_answers',[]),'runtime':'仅Python标准库、本地模拟、2–5个业务模块，含app.py，scenario(data)直接返回契约对应的Python值。Docker无网络、禁止任意依赖或真实外部服务。','contract_hash':job.get('contract_hash',g.digest(None))}
         base['entry']=ENTRY_PROTOCOL
         if stage=='project_build':
+            if fm.enabled(job):
+                base['fault_model_policy']='构建时冻结故障触发规则：any_of为或，各分支为与；谓词只支持JSON路径、标量比较、数组any/all。affected_paths列出故障改变的输出字段。规则描述输入触发条件，不依赖测试或运行输出；未触发输入须满足完整正确契约。不支持的机制返回unsupported说明限制，不静默换题。'
+                if job.get('installed_bundle'):
+                    base['frozen_fault_model']=fm.frozen(job)
+                    base['frozen_private_fault_requirements']=job['private_fault_requirements']
             if job.get('contract'):base['previous_specification']=job['contract']
             if job.get('spec_review_feedback'):base['review_feedback']=job['spec_review_feedback']
             if 'build' in job['assets']:base['previous_project']=g.asset(job,'build')
@@ -101,6 +116,7 @@ def context(job,stage):
         base['requirement']=job['request']
         if job.get('revision_request'):base.update(clarification=job['revision_request'],previous_public_contract=job.get('contract'))
     else:base['contract']=job['contract']
+    if handoff.enabled(job):base['handoff_version']=handoff.VERSION
     if protocol.enabled(job):base['generation_protocol']=protocol.VERSION
     if direct.enabled(job):base['project_flow']=direct.VERSION
     if stage=='fingerprint':
@@ -108,6 +124,10 @@ def context(job,stage):
         base.update(private_fault_requirements=job['private_fault_requirements'],candidate_cases=[{k:c[k] for k in ('id','input','covers')} for c in g.asset(job,'evaluation')['cases'] if c['group']=='target'])
         if job.get('evaluation_repair') and 'fingerprint' in job['assets']:
             base.update(previous_fault_checks=g.asset(job,'fingerprint'),target_cases=job['evaluation_repair']['target_cases'],requirements='只修改target_cases对应的断言，其余逐字保留；不引入运行结果或代码来定义预设症状。')
+    if stage=='fingerprint' and fm.enabled(job):
+        base['frozen_fault_model']=fm.frozen(job)
+        base['impact_cases']=[{k:c[k] for k in ('id','input','covers','group')} for c in g.asset(job,'evaluation')['cases']]
+        base['impact_instruction']='独立核对每个输入是否触发冻结规则及影响字段，返回impacts、review和review_reason，不看实现和实际输出。规则无法表达设计、影响路径不充分或语义矛盾时review=conflict，禁止为了通过而agree。测试主题不是不触发证明；不一致须明确报错，不迎合分类。'
     if stage=='build':base['private_fault_requirements']=job.get('private_fault_requirements','')
     if stage=='diagnosis':
         project=g.asset(job,'build');pool={};variants={}
@@ -130,6 +150,10 @@ def context(job,stage):
             base['open_conflict']=job.get('open_conflict')
             base['recent_rejections']=job.get('handoff_rejections',[])[-2:]
             base['handoff_instruction']='修改许可不是根因判断；先核对失败是否属于主要故障范围，再选代码/分类/指纹/规范/缺少证据。必须回应冲突双方，不得要求同一输入同时保留和消除同一故障。'
+        if fm.enabled(job):
+            base['program_agenda']=fm.agenda(job)
+            base['candidate_feedback']=job.get('candidate_feedback')
+            base['frozen_fault_model']=fm.frozen(job)
         base['valid_check_ids']=[c['id'] for c in matrix.get('checks',[])]
         if consolidated(job):
             base.pop('previous_diagnoses',None)
@@ -168,11 +192,32 @@ def context(job,stage):
         for c in (job.get('matrix') or {}).get('checks',[]):
             if c['visibility']=='public' and c.get('case') in public_cases and c.get('version') in plan['target_variants']:
                 observations.append({**{k:c.get(k) for k in ('id','case','version','status','actual','expected','diagnostic','execution_attempt')},'input':public_cases[c['case']]['input']})
+        if fm.enabled(job):
+            base['frozen_fault_model']=fm.frozen(job)
+            feedback=job.get('candidate_feedback')
+            if feedback:
+                # No private inputs/expected/actual are forwarded to code builder.
+                base['candidate_feedback']={'matrix_id':feedback['matrix_id'],'scope':{name:feedback['scope']['variants'][name] for name in plan['target_variants']},
+                    'observations':[c for c in feedback['observations'] if c['visibility']=='public' and c['version'] in plan['target_variants']]}
+        if handoff.enabled(job):
+            from .generation_delivery import compile_delivery
+            base['repair_handoff']=compile_delivery(job)
+            # Correct answers for faulty target cases are not repair objectives.
+            for observation in observations:
+                if observation['version']=='faulty' and public_cases[observation['case']]['group']=='target':
+                    observation.pop('expected',None)
+                    observation['objective']='fault_reproduction; use repair_handoff public_requirements'
         base['public_observations']=observations[:12]
         base['public_observations_omitted']=max(0,len(observations)-12)
         base['requirements']='仅调整授权版本并保持契约：normal/reference满足全部公开行为；faulty修正故障注入，使指定错误稳定复现并保留未受影响回归，不得消除故障；规避保留指定错误修法并通过部分正常回归。不要只换变量名。'
         if plan['category']=='evasion':base['requirements']+='这是制造错误修复候选，不是修好候选；必须同时满足“至少一项目标失败”和“至少一项正常回归通过”。'
+    if stage=='evaluation' and fm.enabled(job):base['classification_policy']='frozen_input_rules'
     if stage=='evaluation' and direct.enabled(job) and not job.get('evaluation_repair'):
+        if job.get('coverage_repair'):
+            base['coverage_completion']={'base_evaluation':job['coverage_repair']['base_evaluation'],
+                'base_hash':job['coverage_repair']['base_hash'],'attempt':job['coverage_repair']['attempts'],
+                'frozen_fault_model':fm.frozen(job),
+                'instruction':'独立首轮已结束。本轮是故障范围指导的覆盖补全，不再称盲测；只追加满足缺项的检查，保留原检查全部输入/正确期望/可见性/覆盖以及规避要求。正确期望仍只依据公开规范。无实现或实际输出。'}
         candidate=rejected_candidate(job)
         if candidate is not None:base.update(previous_rejected_evaluation=candidate,coverage_feedback=preflight_summary(job))
         if job.get('spec_reviews'):base['specification_review_advice']=job['spec_reviews'][-1]['reason']
@@ -191,7 +236,7 @@ def context(job,stage):
     if stage=='teaching':base.update(private_fault_explanation=g.asset(job,'build')['fault_explanation'],validation_summary={'passed':True,'checks':len(job['matrix']['checks'])})
     if job.get('format_error',{}).get('stage')==stage:
         base['schema_error']=job['format_error']['reason']
-        if stage=='diagnosis' and job['format_error'].get('validation_feedback'):base['validation_feedback']=job['format_error']['validation_feedback']
+        if stage in ('diagnosis','evaluation') and job['format_error'].get('validation_feedback'):base['validation_feedback']=job['format_error']['validation_feedback']
     return base
 
 
@@ -230,6 +275,12 @@ def messages(job,stage):
         instruction=ROLE_INSTRUCTIONS[OWNERS[stage]]+' 当前阶段：'+STAGE_NAMES[stage]+'。'+instruction
     if stage=='project_build':
         instruction+=' 格式示例（仅文件映射片段，不是完整任务）：{"project":{"normal":{"app.py":"Python代码字符串","backend.py":"Python代码字符串"}}}。normal/faulty/reference是对象而非字符串，evasions是版本名到文件对象的映射；禁止对文件映射再次JSON编码。文件名只允许小写字母开头的字母数字下划线模块名.py，禁止solution.py/os.py/sys.py/json.py/site.py。前述JSON schema关键字限制仅适用于contract.input_schema/output_schema，不是外层Bundle协议。'
+    if fm.enabled(job):
+        if stage=='evaluation' and not job.get('evaluation_repair'):
+            instruction+=' 你的分类仅为初步建议，程序将依据事先冻结的私有触发规则计算最终分类。你只负责独立正确输入和期望，不猜测私有实现。'
+        if stage=='diagnosis':instruction+=' program_agenda由程序生成并强制校验。只为当前事项提出修改；认为事项有矛盾则引用证据提出review_spec或need_evidence，不得私自改派、改正确期望或改冻结指纹。'
+    if stage=='project_build' and sp.enabled(job):
+        instruction='你负责局部公开规范补齐。仅输出Amendment，不输出Bundle、代码或冻结描述副本。严格按allowed_paths修改；冻结资产由程序保留。发现公开规则、故障描述或代码有矛盾时引用实际原文返回conflict，不强行消除冲突。输出hash必须来自输入。'
     output_schema=schema(job,stage).model_json_schema()
     if handoff.enabled(job) and stage=='diagnosis':
         from .generation_evidence import response_contract
@@ -251,6 +302,14 @@ def rejected_candidate(job):
 
 def preflight_summary(job):
     raw=rejected_candidate(job)
+    if fm.enabled(job) and isinstance(raw,dict):
+        from .generation_coverage import summary
+        from .generation_protocol import IndependentBehaviorEvaluation
+        try:
+            IndependentBehaviorEvaluation.model_validate(raw)
+            return summary(job,raw)
+        except (ValueError,KeyError,TypeError):
+            return {'classification_status':'unknown','execution_performed':False,'meaning':'资产结构或触发规则求值失败，不能使用模型分组冒充程序最终分组。'}
     cases=raw.get('cases',[]) if isinstance(raw,dict) else []
     cases=[c for c in cases if isinstance(c,dict)] if isinstance(cases,list) else []
     coverage={k:[c['id'] if isinstance(c.get('id'),str) and re.fullmatch(r'[a-z][a-z0-9_-]{0,45}',c['id']) else '<invalid-id>' for c in cases if isinstance(c.get('covers'),list) and k in c['covers']] for k in job['contract']['behaviors']}

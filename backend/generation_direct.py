@@ -35,6 +35,19 @@ class Bundle(Strict):
         if (self.assessment=='clarify')!=bool(self.questions):raise ValueError('仅用户需求歧义可以提出问题')
         return self
 
+from .generation_fault_model import FaultModel
+
+class ModeledBundle(Bundle):
+    fault_model: FaultModel | None
+    @model_validator(mode='after')
+    def frozen_model(self):
+        if self.project:
+            if self.fault_model is None: raise ValueError('可构建项目必须提供冻结故障模型')
+            from .generation_fault_model import validate_model
+            validate_model(self.fault_model.model_dump(),self.contract.model_dump())
+        elif self.fault_model is not None: raise ValueError('尚未构建项目不能先提供故障模型')
+        return self
+
 class Issue(Strict):
     path:str=Field(pattern=r'^/(behaviors/[a-z][a-z0-9_]*|input_domain|simulation|scenario|symptom|constraints|exclusions|input_schema|output_schema)$')
     reason:str=Field(min_length=10,max_length=1200)
@@ -148,7 +161,7 @@ def install_bundle(job):
         job['assets']['build']=directory.name
     job.update(contract=bundle['contract'],contract_hash=g.digest(bundle['contract']),contract_version=job['contract_version']+1,
                confirmed_version=None,private_fault_requirements=bundle['private_fault_requirements'],assessment=bundle['assessment'],rationale=bundle['rationale'],questions=[],matrix=None,installed_bundle=candidate)
-    for key in ('review_digest','spec_approval','contract_clarity','evaluation_repair','pending_plan','contract_candidate','contract_decision','contract_origin_plan','spec_dispute','rejected_evaluation_plan','evaluation_candidate','preflight_review'):
+    for key in ('coverage_repair','evaluation_review_guided','review_digest','spec_approval','contract_clarity','evaluation_repair','pending_plan','contract_candidate','contract_decision','contract_origin_plan','spec_dispute','rejected_evaluation_plan','evaluation_candidate','preflight_review'):
         job.pop(key,None)
     g.put(job)
 
@@ -179,7 +192,13 @@ def apply_review(job):
     job['checkpoint']=stage or 'project_build';g.put(job);return stage
 
 def validate_bundle(job,raw):
-    value=Bundle.model_validate(raw).model_dump()
+    from .generation_fault_model import enabled
+    value=(ModeledBundle if enabled(job) else Bundle).model_validate(raw).model_dump()
+    if enabled(job) and job.get('installed_bundle') and value.get('project'):
+        from . import generation as g
+        prior=g.asset(job,'project_build').get('fault_model')
+        if value['fault_model']!=prior or value['private_fault_requirements']!=job['private_fault_requirements']:
+            raise ValueError('规范补齐不能静默改变冻结故障模型；请重新创建项目')
     feedback=job.get('spec_review_feedback')
     if feedback and job.get('contract') and value['contract']:
         allowed=[i['path'] for i in feedback['issues']]

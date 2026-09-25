@@ -174,7 +174,7 @@ def test_evaluation_coverage_repair_preserves_existing_checks(client):
 def test_expected_fault_failure_is_not_a_broken_generator_variant(client):
     job=prepared();job['matrix']=matrix(job)
     job['matrix']['gates']={'normal':True,'reference':True,'fault_trigger':True,'fault_regression':True,'evasion_rejected':False,'no_runtime_errors':True}
-    with pytest.raises(ValueError,match='预期故障'):plan(job)
+    with pytest.raises(ValueError,match=r'禁止修改=\["faulty"\]'):plan(job)
 
 
 def test_timeout_retries_with_unknown_usage_until_budget(client,monkeypatch):

@@ -32,9 +32,17 @@ class BehaviorEvaluation(Strict):
         return self
 
 def evaluation(job, raw):
+    from . import generation_fault_model as fm
+    if fm.enabled(job):
+        from .generation_coverage import validate
+        raw=validate(job,raw)
     value = (BehaviorEvaluation if enabled(job) else Evaluation).model_validate(raw)
     validate_evaluation(value, Contract.model_validate(job['contract']))
     return value
+
+class IndependentBehaviorEvaluation(Strict):
+    cases: list[BehaviorCase] = Field(min_length=4, max_length=10)
+    evasion_checks: list[str] = Field(min_length=2, max_length=6)
 
 class Assertion(Strict):
     path: list[str] = Field(max_length=8, description='JSON对象键或数组下标；空列表表示整个结果。不支持表达式或代码。')
@@ -48,6 +56,12 @@ class Fingerprint(Strict):
 
 class FaultChecks(Strict):
     checks: list[Fingerprint] = Field(min_length=1, max_length=10)
+
+from .generation_fault_model import Impact
+class ImpactFaultChecks(FaultChecks):
+    review: Literal['agree','conflict']
+    review_reason: str = Field(min_length=10,max_length=1200)
+    impacts: list[Impact] = Field(min_length=4, max_length=10)
 
 def matches(actual, check):
     for assertion in check['assertions']:
@@ -64,7 +78,9 @@ def matches(actual, check):
 
 def validate_faults(job, raw):
     from . import generation as g
-    value = FaultChecks.model_validate(raw).model_dump()
+    from . import generation_fault_model as fm
+    value = (ImpactFaultChecks if fm.enabled(job) else FaultChecks).model_validate(raw).model_dump()
+    if fm.enabled(job):fm.validate_impacts(job,value)
     if len(json.dumps(value).encode()) > 24000: raise ValueError('故障断言资产过大')
     cases = {c['id']: c for c in g.asset(job, 'evaluation')['cases']}
     seen = set()
